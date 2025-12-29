@@ -8,5 +8,14 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 - Music from custom maps, such as [Airship](https://thunderstore.io/c/gang-beasts/p/MinimackStudios/Airship/), [Airport](https://thunderstore.io/c/gang-beasts/p/konradKG25/Airport/), and more.
 - Custom made-up names for tracks not officially released on [doseone's Bandcamp page](https://doseone.bandcamp.com/album/gang-beasts-original-soundtrack) for consistency. (Trawler, Train, etc.)
 
+# Shortcuts
+- "L" enables looping
+- "Shift + right arrow" next song
+- "Shift + left arrow" previous song
+- "Spacebar" pause/play
+- "Left arrow" skip ahead 10/s
+- "Right arrow" backtrack 10/s
+- Click on the cover for a song to open the fullscreen music player
+
 # Disclaimer
 I do not own the rights to any music on this website. All tracks are the property of their respective owners. This website has been made for entertainment purposes.
