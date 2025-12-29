@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gang Beasts OST Player</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <main class="content">
+    <section class="hero">
+      <div class="hero-art" id="heroArt">
+        <img src="images/Gang Beasts Days.png" alt="cover" id="coverImg">
+      </div>
+      <div class="hero-info">
+        <h1 id="trackTitle">Loading...</h1>
+        <p id="trackArtist"></p>
+      </div>
+    </section>
+
+    <!-- Top-right action buttons -->
+    <div class="top-actions">
+      <div class="view-wrap">
+        <button id="viewBtn" class="view-btn" aria-haspopup="true" aria-expanded="false" title="View options" aria-label="View options">View
+          <svg viewBox="0 0 12 8" width="12" height="8" aria-hidden="true" focusable="false"><path d="M1 1l5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
+        </button>
+        <div id="viewDropdown" class="view-dropdown" role="menu" aria-hidden="true">
+          <button class="dropdown-item" role="menuitem" data-value="all" aria-pressed="true">Show all tracks</button>
+          <button class="dropdown-item" role="menuitem" data-value="exclude" aria-pressed="false">Exclude custom maps</button>
+          <button class="dropdown-item" role="menuitem" data-value="only" aria-pressed="false">Only custom maps</button>
+        </div>
+      </div>
+      <button id="downloadAllBtn" class="preload-all" title="Download all tracks" aria-label="Download all tracks" data-tooltip="Download every track as a ZIP">
+        <svg viewBox="0 0 11 13" width="12" height="14" aria-hidden="true" focusable="false"><path d="m1.3 12.3l9-0.1m-8.5-6.5l4 3.5 4-3.5m-4-5v8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" fill="none"/></svg>
+        Download All
+      </button>
+      <button id="preloadAllBtn" class="preload-all" data-tooltip="Cache and decode all tracks for 100% seamless looping, persists across page refreshes after 10-20 seconds of loading" aria-label="Preload all tracks for instant playback" tabindex="0">Preload All</button>
+      <a id="githubBtn" class="preload-all" href="https://github.com/gangbeastsost/gangbeastsost.github.io" target="_blank" rel="noopener" aria-label="Open GitHub repository" title="Open GitHub repository">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2 .37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+
+    <section class="track-list" id="trackList" aria-live="polite"></section>
+  </main>
+
+  <audio id="audio" preload="none"></audio>
+
+  <!-- Mini player (visible after closing modal or while playing) -->
+  <footer id="miniPlayer" class="mini-player" aria-hidden="false">
+    <div class="mini-left-wrap">
+      <img id="miniCover" class="mini-cover" src="images/Gang Beasts Days.png" alt="cover">
+      <div class="mini-meta">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div id="miniTitle" class="mini-title">No track</div>
+          <button id="miniDownload" class="mini-download" title="Download" aria-label="Download track">
+            <svg viewBox="0 0 11 13" width="12" height="14" aria-hidden="true" focusable="false"><path d="m1.3 12.3l9-0.1m-8.5-6.5l4 3.5 4-3.5m-4-5v8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" fill="none"/></svg>
+          </button>
+        </div>
+        <div id="miniArtist" class="mini-artist">Gang Beasts OST</div>
+      </div>
+    </div>
+    <div class="mini-controls">
+      <div class="mini-buttons">
+        <button id="miniShuffle" class="mini-btn" title="Shuffle" aria-pressed="false">
+          <img src="images/shuffle.svg" alt="Shuffle" width="18" height="18">
+        </button>
+        <button id="miniPrev" class="mini-btn" title="Previous">⏮</button>
+        <button id="miniPlay" class="mini-btn" title="Play">▶</button>
+        <button id="miniNext" class="mini-btn" title="Next">⏭</button>
+        <button id="miniLoop" class="mini-btn" title="Loop" aria-pressed="false">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M464 210.511V264a112.127 112.127 0 0 1-112 112H78.627l44.686-44.687l-22.626-22.626L56 353.373l-4.415 4.414l-33.566 33.567l74.022 83.276l23.918-21.26L75.63 408H352c79.4 0 144-64.6 144-144v-85.489Z"/><path fill="currentColor" d="M48 256a112.127 112.127 0 0 1 112-112h273.373l-44.686 44.687l22.626 22.626L456 166.627l4.117-4.116l33.864-33.865l-74.022-83.276l-23.918 21.26L436.37 112H160c-79.4 0-144 64.6-144 144v85.787l32-32Z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="mini-seek-wrap">
+      <div class="mini-left"><span id="miniCur">0:00</span></div>
+      <input id="miniSeek" class="seek-common" type="range" min="0" max="100" value="0" aria-label="seek">
+      <div class="mini-times"><span id="miniRem">0:00</span></div>
+    </div>
+  </footer>
+
+  <!-- Modal full-screen player -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-bg" id="modalBg"></div>
+    <div class="modal-bg modal-bg2" id="modalBg2"></div>
+    <button class="modal-back m-controls-button" id="modalBack" title="Back" aria-label="Back">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><title>Arrow-left SVG Icon</title><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m11 5l-7 7l7 7m-7-7h16"/></svg>
+    </button>
+    <div class="modal-player">
+      <div class="modal-art">
+        <img id="mCover" src="images/Gang Beasts Days.png" alt="cover">
+      </div>
+      <div class="modal-info">
+        <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
+          <div class="m-title" id="mTitle">Title</div>
+          <button id="mDownload" class="m-download" title="Download" aria-label="Download track">
+            <svg viewBox="0 0 11 13" width="12" height="14" aria-hidden="true" focusable="false"><path d="m1.3 12.3l9-0.1m-8.5-6.5l4 3.5 4-3.5m-4-5v8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" fill="none"/></svg>
+          </button>
+        </div>
+        <div class="m-artist" id="mArtist">Artist</div>
+
+        <div class="m-progress">
+          <div class="times"><span id="mCur">0:00</span><span id="mRem">-0:00</span></div>
+          <input id="mSeek" class="seek-common" type="range" min="0" max="100" value="0">
+        </div>
+
+        <div class="m-controls">
+          <button id="mShuffle" title="Shuffle" aria-pressed="false">
+            <img src="images/shuffle.svg" alt="Shuffle" width="22" height="22">
+          </button>
+          <button id="mPrev">⏮</button>
+          <button id="mPlay">▶</button>
+          <button id="mNext">⏭</button>
+          <button id="mLoop" title="Loop" aria-pressed="false">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><title>Loop SVG Icon</title><path fill="currentColor" d="M464 210.511V264a112.127 112.127 0 0 1-112 112H78.627l44.686-44.687l-22.626-22.626L56 353.373l-4.415 4.414l-33.566 33.567l74.022 83.276l23.918-21.26L75.63 408H352c79.4 0 144-64.6 144-144v-85.489Z"/><path fill="currentColor" d="M48 256a112.127 112.127 0 0 1 112-112h273.373l-44.686 44.687l22.626 22.626L456 166.627l4.117-4.116l33.864-33.865l-74.022-83.276l-23.918 21.26L436.37 112H160c-79.4 0-144 64.6-144 144v85.787l32-32Z"/></svg>
+          </button>
+        </div>
+        <div class="m-volume" style="margin-top:12px;display:flex;align-items:center;gap:10px">
+          <label style="color:var(--muted);font-size:.9rem">Volume</label>
+          <input id="mVolume" type="range" min="0" max="1" step="0.01" value="0.9" style="flex:1">
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="script.js" type="module"></script>
+</body>
+</html>
