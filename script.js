@@ -277,15 +277,9 @@ function setPreloading(active){
     if(active){
       // stop progress updates and show preload state
       try{ stopProgress(); }catch(e){}
-      // If no audio source is loaded, keep the time display at 0:00 (avoid overlapping UI).
-      try{
-        const hasSrc = !!(audio && audio.src);
-        if(mRem) mRem.textContent = hasSrc ? 'Preloading...' : fmt(0);
-        if(miniRem) miniRem.textContent = hasSrc ? 'Preloading...' : fmt(0);
-      }catch(e){
-        if(mRem) mRem.textContent = fmt(0);
-        if(miniRem) miniRem.textContent = fmt(0);
-      }
+      // Never render long text here (it overlaps the seek UI). Keep duration at 0:00 while preloading.
+      if(mRem) mRem.textContent = fmt(0);
+      if(miniRem) miniRem.textContent = fmt(0);
       // Only replace the hero title when a track is already loaded.
       // If nothing is loaded ("No song playing"), keep that text unchanged during preloading.
       try{ if(trackTitle && audio && audio.src) trackTitle.textContent = 'Preloading...'; }catch(e){}
