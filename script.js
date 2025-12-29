@@ -48,6 +48,45 @@ let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
 
+const OFFICIAL_ARTIST = 'doseone & Bob Larder';
+
+function isTrackAllowedByViewFilter(t){
+  try{
+    if(!t) return false;
+    const artist = (t.artist ? String(t.artist).trim() : '');
+    if(currentViewFilter === 'exclude'){
+      return artist === OFFICIAL_ARTIST;
+    }
+    if(currentViewFilter === 'only'){
+      return artist !== OFFICIAL_ARTIST;
+    }
+    return true;
+  }catch(e){ return true; }
+}
+
+function getPlayableIndices(){
+  try{
+    const out = [];
+    for(let i=0;i<tracks.length;i++){
+      if(isTrackAllowedByViewFilter(tracks[i])) out.push(i);
+    }
+    return out;
+  }catch(e){ return []; }
+}
+
+function findNextAllowedIndex(fromIndex, dir){
+  try{
+    const n = tracks.length;
+    if(!n) return 0;
+    const start = (typeof fromIndex === 'number' ? fromIndex : 0);
+    for(let step=1; step<=n; step++){
+      const cand = (start + (dir * step) + n) % n;
+      if(isTrackAllowedByViewFilter(tracks[cand])) return cand;
+    }
+    return start;
+  }catch(e){ return (fromIndex + dir + tracks.length) % tracks.length; }
+}
+
 function getDefaultCover(){
   return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="100%" height="100%" fill="#444" rx="24"/><text x="50%" y="50%" font-size="80" fill="#bbb" font-family="Inter, system-ui, Arial, sans-serif" font-weight="700" dominant-baseline="middle" text-anchor="middle">:(</text></svg>');
 }
@@ -80,7 +119,7 @@ let nextSwitching = false;
 function computeNextIndexForAuto(){
   try{
     if(isShuffling && shuffleQueue && shuffleQueue.length>0) return shuffleQueue[0];
-    return (index + 1) % tracks.length;
+    return findNextAllowedIndex(index, 1);
   }catch(e){ return (index + 1) % tracks.length; }
 }
 
@@ -264,10 +303,9 @@ function switchToWebLoop(file, offset=0){
 let _bg2PendingListener = null;
 
 function buildShuffleQueue(current){
-  const n = tracks.length;
-  if(n <= 1) return [];
-  const arr = [];
-  for(let i=0;i<n;i++){ if(i!==current) arr.push(i); }
+  const allowed = getPlayableIndices();
+  if(!allowed || allowed.length <= 1) return [];
+  const arr = allowed.filter(i=>i!==current);
   for(let i=arr.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]] = [arr[j],arr[i]] }
   return arr;
 }
@@ -505,6 +543,8 @@ async function init(){
             // close after selection
             closeDropdown();
             try{ renderList(); }catch(e){}
+            // if shuffle is active, rebuild the shuffle queue against the new filter
+            try{ if(isShuffling) setShuffleState(true); }catch(e){}
           });
           // close when clicking outside or pressing Escape
           document.addEventListener('click', ()=>{ closeDropdown(); });
@@ -934,12 +974,20 @@ function skip(dir){
         let nextIndex = null;
         // if user previously hit Prev, allow Next to go forward through that history
         if(shuffleForward && shuffleForward.length > 0){
-          nextIndex = shuffleForward.pop();
-        } else {
+          while(shuffleForward.length > 0){
+            const cand = shuffleForward.pop();
+            if(isTrackAllowedByViewFilter(tracks[cand])){ nextIndex = cand; break; }
+          }
+        }
+        if(nextIndex === null || nextIndex === undefined){
           if(!shuffleQueue || shuffleQueue.length === 0){
             shuffleQueue = buildShuffleQueue(index);
           }
-          nextIndex = (shuffleQueue && shuffleQueue.length) ? shuffleQueue.shift() : null;
+          // consume from queue until we find an allowed track (in case filter changed)
+          while(shuffleQueue && shuffleQueue.length){
+            const cand = shuffleQueue.shift();
+            if(isTrackAllowedByViewFilter(tracks[cand])){ nextIndex = cand; break; }
+          }
         }
         if(nextIndex === null || nextIndex === undefined) return;
         if(shuffleHistory) shuffleHistory.push(index);
@@ -949,7 +997,12 @@ function skip(dir){
       // prev
       else if(dir < 0){
         if(shuffleHistory && shuffleHistory.length > 0){
-          const prevIndex = shuffleHistory.pop();
+          let prevIndex = null;
+          while(shuffleHistory.length > 0){
+            const cand = shuffleHistory.pop();
+            if(isTrackAllowedByViewFilter(tracks[cand])){ prevIndex = cand; break; }
+          }
+          if(prevIndex === null || prevIndex === undefined) return;
           if(shuffleForward) shuffleForward.push(index);
           index = prevIndex;
         } else {
@@ -966,7 +1019,7 @@ function skip(dir){
       index = (index + dir + tracks.length) % tracks.length;
     }
   } else {
-    index = (index + dir + tracks.length) % tracks.length;
+    index = findNextAllowedIndex(index, dir);
   }
 
   // reset saved web offset when changing tracks
