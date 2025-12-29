@@ -1,0 +1,357 @@
+:root{--bg1:#1a0528;--bg2:#3f0f4a;--accent:#ff4d7e;--accent-2:#ffb86b;--muted:#c9c9d0}
+*{box-sizing:border-box;font-family:Inter,system-ui,Arial,Segoe UI,Roboto,'Helvetica Neue',sans-serif}
+.page-bg{position:fixed;inset:0;z-index:0}
+html,body{height:100%;margin:0;color:white;position:relative}
+/* main page blurred background image from images/background.png */
+body::before{content:"";position:fixed;inset:-40px;background-image:url('images/background.png');background-size:cover;background-position:center;filter:blur(18px) brightness(.38) saturate(1.05);z-index:0;transform:scale(1.06);transform-origin:center center}
+.site-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:linear-gradient(90deg,rgba(255,255,255,0.02),transparent);backdrop-filter:blur(6px);position:relative;z-index:3}
+.brand{font-weight:700;letter-spacing:0.05em}
+.controls-top button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 10px;border-radius:8px;margin-left:8px}
+.content{position:relative;z-index:2;padding:28px;padding-bottom:140px;max-width:1100px;margin:0 auto}
+.hero{display:flex;gap:18px;align-items:center;margin-bottom:20px}
+.hero-art{width:160px;height:160px;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.6);flex:0 0 160px;transform:translateY(0);transition:transform .4s ease}
+.hero-art img{width:100%;height:100%;object-fit:cover;display:block}
+.hero-info h1{margin:0;font-size:1.4rem}
+.hero-info p{margin:6px 0 0;color:var(--muted)}
+.track-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.track{background:rgba(255,255,255,0.02);padding:12px;border-radius:10px;display:flex;gap:12px;align-items:center;transition:transform .18s ease,box-shadow .18s ease;border:1px solid rgba(0,0,0,0.25);box-shadow:0 10px 25px rgba(0,0,0,0.6);position:relative}
+.track:hover{transform:translateY(-6px);box-shadow:0 18px 40px rgba(0,0,0,0.7)}
+.track img{width:56px;height:56px;border-radius:8px;object-fit:cover}
+.track .meta{flex:1}
+.track .meta .title{font-weight:600}
+.track .meta .sub{font-size:.85rem;color:var(--muted);margin-top:6px}
+.player{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(6,6,10,0.6),rgba(0,0,0,0.6));backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:8px}
+.player button{background:transparent;border:none;color:white;padding:8px 10px;border-radius:8px}
+.player input[type=range]{cursor:pointer}
+.time{font-size:.9rem;color:var(--muted);margin-left:12px}
+
+@media (max-width:700px){.hero{flex-direction:column;align-items:flex-start}.hero-art{width:120px;height:120px}.player{flex-direction:column;align-items:stretch}}
+
+@media (max-width:700px){
+  .modal-player{margin-right:0}
+}
+
+/* Mobile modal: stack cover on top and ensure centered layout on narrow viewports */
+@media (max-width:700px){
+  .modal{padding:18px 12px}
+  .modal-player{flex-direction:column;align-items:center;margin:0 auto;padding:16px;gap:12px;width:calc(100% - 32px);max-width:720px;box-sizing:border-box;position:relative;left:6%;transform:translateX(-50%)}
+  .modal-art{flex:0 0 auto;width:100%;padding:8px;border-radius:10px;display:flex;justify-content:center}
+  .modal-art img{max-width:420px;width:100%;height:auto;border-radius:8px}
+  .modal-info{width:100%}
+  .m-controls{margin-top:12px}
+}
+
+.hero-art{animation:none}
+.hero-art.playing{animation-play-state:paused}
+
+/* Modal player styles (mobile-like) */
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:60}
+.modal.hidden{display:none}
+.modal-bg{position:absolute;inset:-40px;background-color:rgba(10,6,20,0.45);background-size:cover;background-position:center;filter:blur(30px) brightness(.44) saturate(1.05);pointer-events:none;transform:scale(1.05);transform-origin:center center;transition:opacity .32s ease, transform .32s ease;opacity:1}
+.modal-bg2{position:absolute;inset:-40px;background-color:rgba(10,6,20,0.45);background-size:cover;background-position:center;filter:blur(30px) brightness(.44) saturate(1.05);pointer-events:none;transform:scale(1.05);transform-origin:center center;transition:opacity .28s ease, transform .28s ease;opacity:0;z-index:2}
+.modal-player{position:relative;z-index:10;max-width:940px;width:94%;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent);border-radius:14px;padding:26px;display:flex;gap:18px;align-items:center;border:1px solid rgba(255,255,255,0.04);box-shadow:0 30px 120px rgba(0,0,0,0.7);animation:modalIn .32s cubic-bezier(.2,.9,.2,1) both;margin-right:40px}
+.modal-art{flex:0 0 46%;display:flex;align-items:center;justify-content:center;padding:18px;border-radius:12px;background:linear-gradient(135deg,rgba(255,77,126,0.06),rgba(255,184,107,0.03));}
+.modal-art img{width:100%;height:auto;border-radius:8px;box-shadow:inset 0 2px 8px rgba(255,255,255,0.02),0 28px 80px rgba(0,0,0,0.7);border:4px solid rgba(255,255,255,0.02)}
+.modal-art img{transition:opacity .32s ease}
+.modal-info{flex:1;color:var(--muted)}
+.m-title{font-weight:700;font-size:1.05rem;color:white;text-shadow:0 10px 30px rgba(0,0,0,0.7),0 1px 0 rgba(0,0,0,0.5)}
+.track-title-main{color:white}
+.track .meta .title{color:white}
+.m-artist{margin-top:6px;color:var(--muted)}
+.m-progress{margin-top:14px}
+.m-progress .times{display:flex;justify-content:space-between;color:var(--muted);font-size:.9rem;margin-bottom:8px}
+.m-progress input[type=range]{width:100%;accent-color:var(--accent)}
+
+/* Shared seek styling (main + mini) */
+.seek-common, .m-progress input[type=range]{-webkit-appearance:none;appearance:none;background:linear-gradient(90deg,var(--accent),var(--accent-2));height:14px;border-radius:10px;outline:none;background-repeat:no-repeat;background-size:100% 6px;background-position:center}
+.seek-common::-webkit-slider-thumb, .m-progress input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:white;border:2px solid rgba(0,0,0,0.25);box-shadow:0 2px 6px rgba(0,0,0,0.4);margin-top:0}
+.seek-common::-moz-range-thumb, .m-progress input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:white;border:2px solid rgba(0,0,0,0.25);box-shadow:0 2px 6px rgba(0,0,0,0.4)}
+.seek-common:focus{box-shadow:0 0 0 6px rgba(255,77,126,0.06)}
+.m-controls{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:18px}
+.m-controls button{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);color:white;padding:12px 14px;border-radius:10px;font-size:20px;cursor:pointer;transition:opacity .12s ease,transform .08s ease;opacity:.9;position:relative}
+.m-controls button, #mShuffle, #mLoop{position:relative}
+.m-controls button:hover{opacity:1;transform:translateY(-2px)}
+.m-controls button.active, #mShuffle.active, #mLoop.active{background:rgba(255,77,126,0.94);color:white;box-shadow:0 28px 90px rgba(255,77,126,0.24), 0 8px 26px rgba(255,184,107,0.10);border-color:rgba(255,255,255,0.08)}
+/* remove pseudo-element glow to avoid seams; solid high-opacity fill reduces visible edges */
+#mShuffle.active::after, #mLoop.active::after, .m-controls button.active::after{content:none}
+.modal-back{position:absolute;left:18px;top:12px;background:transparent;border:none;color:white;font-size:15px;z-index:70;padding:8px 12px;border-radius:10px;cursor:pointer;opacity:0;transform:translateY(-6px);transition:opacity .28s ease, transform .28s ease}
+.modal:not(.hidden) .modal-back{opacity:1;transform:translateY(0)}
+.modal.closing .modal-back{opacity:0;transform:translateY(-6px)}
+
+/* Mini player styles */
+.mini-player{position:fixed;left:12px;right:12px;bottom:14px;z-index:50;background:linear-gradient(90deg,rgba(0,0,0,0.45),rgba(20,6,40,0.45));backdrop-filter:blur(6px);display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:18px 18px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 20px 50px rgba(0,0,0,0.6)}
+.mini-player.hidden{display:none}
+.mini-cover{width:56px;height:56px;border-radius:8px;object-fit:cover;cursor:pointer;transition:opacity .32s ease}
+
+/* mini player times (to the right of seek) */
+.mini-times{display:flex;gap:2px;color:var(--muted);font-size:.9rem;margin-left:2px;min-width:auto;justify-content:flex-end}
+
+/* Greyed-out seeker and muted UI when no song playing */
+.mini-player.no-song .seek-common{filter:grayscale(.6) saturate(.2);opacity:.5}
+.mini-player.no-song .mini-cover{opacity:.6;filter:grayscale(.6)}
+.mini-player.no-song .mini-times{color:rgba(200,200,200,0.6)}
+
+/* modal exit animation */
+.modal.closing .modal-player{animation:modalOut .22s cubic-bezier(.2,.9,.2,1) both}
+@keyframes modalOut{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(10px) scale(.98)}}
+
+/* mini-player exit animation: apply .hiding to animate out */
+.mini-player.hiding{transform:translateY(8px);opacity:0}
+.mini-meta{min-width:0}
+.mini-left-wrap{display:flex;align-items:center;gap:12px}
+.mini-left-wrap{min-width:0;max-width:300px}
+.mini-controls{display:flex;align-items:center;gap:6px;flex:1;min-width:0;justify-content:center;position:absolute;left:50%;transform:translateX(-50%);z-index:6;top:18px}
+.mini-title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-download, .m-download{
+  display:none; /* hidden when no song is loaded */
+  width:30px;height:30px;min-width:30px;min-height:30px;/* square */
+  align-items:center;justify-content:center;
+  background:transparent;border:none;color:var(--muted);margin-left:6px;padding:0;border-radius:6px;cursor:pointer
+}
+.mini-download svg, .m-download svg{width:14px;height:16px;display:block;color:currentColor}
+.mini-download:hover, .m-download:hover{color:var(--accent);background:rgba(255,255,255,0.02)}
+.mini-download:disabled, .m-download:disabled{opacity:0.6;filter:grayscale(.6);cursor:default}
+
+/* When a track is loaded, show the download buttons */
+body.has-track .mini-download,
+body.has-track .m-download{ display:inline-flex }
+.mini-artist{font-size:.9rem;color:var(--muted)}
+/* removed old rule - handled above */
+.mini-left{min-width:36px;width:36px;text-align:left;color:var(--muted);font-size:.88rem;padding-right:4px}
+.mini-seek-wrap{position:absolute;left:50%;transform:translateX(-50%);top:68%;display:flex;align-items:center;gap:4px;width:70%;max-width:640px;justify-content:center;z-index:4}
+.mini-seek-wrap input#miniSeek{flex:1;min-width:120px;max-width:100%}
+.mini-seek-wrap .mini-times{min-width:36px;width:36px;text-align:right;margin-left:4px}
+.mini-buttons{display:flex;gap:8px;flex-shrink:0;margin:0 auto}
+.mini-buttons .mini-btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 8px}
+
+/* icon sizing for external SVG files */
+.mini-btn img{width:18px;height:18px;display:block;filter:invert(1) brightness(1.2)}
+.m-controls img{width:22px;height:22px;display:block;filter:invert(1) brightness(1.2)}
+
+/* active style for mini buttons */
+.mini-btn.active{background:rgba(255,77,126,0.94);color:white;box-shadow:0 28px 90px rgba(255,77,126,0.24), 0 8px 26px rgba(255,184,107,0.10);border-color:rgba(255,255,255,0.08)}
+.mini-buttons{display:flex;gap:8px}
+.mini-btn{display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);color:white;padding:8px;border-radius:8px;font-size:16px;cursor:pointer;transition:opacity .12s ease,transform .08s ease;opacity:.9}
+.mini-btn:hover{opacity:1;transform:translateY(-2px)}
+
+/* When no song is loaded, make mini buttons inert and visibly disabled */
+.mini-player.no-song .mini-btn{pointer-events:none;opacity:.6;filter:grayscale(.6);cursor:default}
+.mini-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.6)}
+.mini-btn:disabled:hover{transform:none}
+
+/* range thumb pointer */
+input[type=range]::-webkit-slider-thumb{cursor:pointer}
+input[type=range]::-moz-range-thumb{cursor:pointer}
+
+/* Ensure range inputs are block-level so the thumb centers vertically */
+input[type=range]{display:block;padding:0;margin:0}
+
+/* hide site header when modal open */
+.modal-open .site-header{display:none !important}
+
+/* modal entrance animation */
+@keyframes modalIn{0%{opacity:0;transform:translateY(10px) scale(.98)}100%{opacity:1;transform:translateY(0) scale(1)}}
+
+/* mini-player entrance */
+.mini-player{transform:translateY(8px);opacity:0;transition:transform .26s cubic-bezier(.2,.9,.2,1),opacity .18s}
+.mini-player:not(.hidden){transform:translateY(0);opacity:1}
+
+/* make clickable elements show pointer */
+button, .track{cursor:pointer}
+
+/* subtle top controls */
+.controls-top button{background:transparent;border:1px solid rgba(255,255,255,0.05);padding:6px;border-radius:9px;color:var(--muted)}
+.controls-top button.active{background:rgba(255,255,255,0.03);color:var(--accent)}
+
+/* Top-right action buttons container */
+.top-actions{position:fixed;top:18px;right:18px;z-index:90;display:flex;gap:10px;align-items:center}
+
+/* Preload, Download All and View button styling (top-actions) */
+#preloadAllBtn, #downloadAllBtn, #githubBtn, .view-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  /* dimmer appearance with same blur as mini-player */
+  background: rgba(8,6,10,0.45);
+  backdrop-filter: blur(6px) saturate(0.95);
+  -webkit-backdrop-filter: blur(6px) saturate(0.95);
+  border: 1px solid rgba(255,255,255,0.04);
+  color: var(--muted);
+  padding:10px 12px;border-radius:10px;font-size:14px;cursor:pointer;
+  transition:opacity .12s ease,transform .08s ease,box-shadow .12s ease,color .12s ease;
+  opacity:.92;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+}
+#downloadAllBtn:hover,#preloadAllBtn:hover,#githubBtn:hover,.view-btn:hover{opacity:1;transform:translateY(-3px);color:white;box-shadow:0 18px 48px rgba(0,0,0,0.6)}
+#downloadAllBtn:disabled,#preloadAllBtn:disabled,#githubBtn:disabled,.view-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.2)}
+
+@media (max-width:700px){
+  .top-actions{right:12px;top:12px}
+  #preloadAllBtn,#downloadAllBtn,#githubBtn{padding:8px 10px;font-size:13px}
+}
+
+/* Hide GitHub button on small screens and remove underline from its text */
+@media (max-width:700px){
+  #githubBtn{display:none}
+  #downloadAllBtn{display:none}
+}
+
+#githubBtn{ text-decoration:none }
+
+#preloadAllBtn[data-tooltip]{position:relative}
+#preloadAllBtn[data-tooltip]::after{
+  content:attr(data-tooltip);
+  position:absolute;
+  left:50%;
+  top:calc(100% + 10px);
+  transform:translateX(-50%) translateY(-6px);
+  background: linear-gradient(90deg, rgba(0,0,0,0.45), rgba(20,6,40,0.45));
+  color: #fff;
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:13px;
+  line-height:1.2;
+  white-space:normal;
+  max-width:300px;
+  text-overflow:ellipsis;
+  overflow-wrap:break-word;
+  box-shadow:0 10px 30px rgba(0,0,0,0.6);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .12s ease,transform .12s ease;
+  z-index:200;
+}
+#preloadAllBtn[data-tooltip]::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:calc(100% + 2px);
+  transform:translateX(-50%);
+  border:6px solid transparent;
+  border-bottom-color:rgba(20,6,40,0.45);
+  opacity:0;
+  transition:opacity .12s ease;
+  pointer-events:none;
+  z-index:200;
+}
+#preloadAllBtn[data-tooltip]:hover::after,#preloadAllBtn[data-tooltip]:focus::after{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+#preloadAllBtn[data-tooltip]:hover::before,#preloadAllBtn[data-tooltip]:focus::before{
+  opacity:1;
+}
+
+/* If tooltip is flipped to the right (button near edge), align tooltip's right edge to button */
+#preloadAllBtn.tooltip-right[data-tooltip]::after{ left:auto; right:0; transform:translateX(0) translateY(-6px); }
+#preloadAllBtn.tooltip-right[data-tooltip]::before{ left:auto; right:8px; transform:translateX(0); }
+
+/* Mirror tooltip styles for Download All button */
+#downloadAllBtn[data-tooltip]{position:relative}
+#downloadAllBtn[data-tooltip]::after{
+  content:attr(data-tooltip);
+  position:absolute;
+  left:50%;
+  top:calc(100% + 10px);
+  transform:translateX(-50%) translateY(-6px);
+  background: linear-gradient(90deg, rgba(0,0,0,0.45), rgba(20,6,40,0.45));
+  color: #fff;
+  padding:8px 10px;
+  border-radius:8px;
+  font-size:13px;
+  line-height:1.2;
+  white-space:normal;
+  max-width:300px;
+  text-overflow:ellipsis;
+  overflow-wrap:break-word;
+  box-shadow:0 10px 30px rgba(0,0,0,0.6);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .12s ease,transform .12s ease;
+  z-index:200;
+}
+#downloadAllBtn[data-tooltip]::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:calc(100% + 2px);
+  transform:translateX(-50%);
+  border:6px solid transparent;
+  border-bottom-color:rgba(20,6,40,0.45);
+  opacity:0;
+  transition:opacity .12s ease;
+  pointer-events:none;
+  z-index:200;
+}
+#downloadAllBtn[data-tooltip]:hover::after,#downloadAllBtn[data-tooltip]:focus::after{
+  opacity:1;
+  transform:translateX(-50%) translateY(0);
+}
+#downloadAllBtn[data-tooltip]:hover::before,#downloadAllBtn[data-tooltip]:focus::before{
+  opacity:1;
+}
+#downloadAllBtn.tooltip-right[data-tooltip]::after{ left:auto; right:0; transform:translateX(0) translateY(-6px); }
+#downloadAllBtn.tooltip-right[data-tooltip]::before{ left:auto; right:8px; transform:translateX(0); }
+
+/* View button + dropdown styles */
+.view-wrap{position:relative;display:flex;align-items:center}
+.view-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;font-size:14px}
+
+/* modal back button should visually match modal control buttons (play/etc) */
+.m-controls-button{
+  display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);color:white;padding:12px;border-radius:10px;font-size:20px;cursor:pointer;transition:opacity .12s ease,transform .08s ease;opacity:.9;
+}
+.m-controls-button:hover{opacity:1;transform:translateY(-2px)}
+.view-btn svg{opacity:0.9}
+.view-btn:focus{outline:none;box-shadow:0 6px 20px rgba(0,0,0,0.5)}
+.view-dropdown{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);min-width:200px;background:linear-gradient(180deg,rgba(8,6,10,0.66),rgba(20,6,40,0.66));border-radius:10px;padding:8px;box-shadow:0 12px 40px rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.03);display:none;z-index:220;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.view-dropdown[aria-hidden="false"]{display:block}
+.dropdown-item{display:block;width:100%;text-align:left;background:transparent;border:none;color:var(--muted);padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px}
+.dropdown-item[aria-pressed="true"]{color:white;background:linear-gradient(90deg,var(--accent),var(--accent-2));box-shadow:0 18px 50px rgba(0,0,0,0.6)}
+.dropdown-item:hover{color:white;background:rgba(255,255,255,0.03)}
+
+@media (max-width:480px){
+  #preloadAllBtn[data-tooltip]::after{white-space:normal;max-width:200px;left:50%;right:12px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  #preloadAllBtn[data-tooltip]::after,#preloadAllBtn[data-tooltip]::before{transition:none}
+}
+
+
+/* Scale mini player up ~20% on mobile so controls have more room */
+@media (max-width:700px){
+  .mini-player:not(.hidden){
+    transform: translateY(0) scale(1.12) !important;
+    transform-origin: center bottom;
+  }
+  .mini-player{padding:20px 20px}
+  .mini-left-wrap{gap:16px}
+  .mini-cover{width:68px;height:68px;margin-right:10px;flex-shrink:0}
+  .mini-seek-wrap{width:80%;top:auto;bottom:6px}
+  .mini-controls{top:22px}
+}
+/* Visual state while restoring/preloading: keep seekers and playheads active (no greying)
+   Seekers and playhead time elements are intentionally NOT dimmed or disabled here.
+*/
+
+/* Make disabled range inputs visibly greyed so a disabled mini seeker looks inactive */
+input[type=range]:disabled, .seek-common:disabled {
+  opacity: 0.5;
+  filter: grayscale(.6) saturate(.2);
+  pointer-events: none;
+}
+
+/* Lock mini controls to centered position when no song is loaded so long titles don't shift them */
+/* removed .no-song absolute rule; controls are always centered via absolute positioning above */
+
+/* Mobile / zoomed-in adjustments: hide non-essential mini metadata and downloads */
+@media (max-width:480px){
+  .mini-meta{display:none}
+  .mini-download, .m-download{display:none !important}
+  .mini-cover{width:44px;height:44px}
+  .mini-seek-wrap{width:78%;top:auto;bottom:4px}
+  /* Hide current time and total duration on very small screens to reduce clutter */
+  .mini-left{display:none}
+  .mini-seek-wrap .mini-times{display:none}
+  .mini-controls{top:20px}
+}
+
