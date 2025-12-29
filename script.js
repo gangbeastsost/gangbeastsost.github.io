@@ -53,6 +53,8 @@ function getDefaultCover(){
 }
 let shuffleQueue = [];
 let shuffleCycleFinished = false;
+let shuffleHistory = [];
+let shuffleForward = [];
 // WebAudio gapless loop support
 // Seamless WebAudio loop support disabled. Keeping no-op stubs so we can re-enable later if requested.
 let audioCtx = null;
@@ -275,8 +277,15 @@ function setPreloading(active){
     if(active){
       // stop progress updates and show preload state
       try{ stopProgress(); }catch(e){}
-      if(mRem) mRem.textContent = 'Preloading...';
-      if(miniRem) miniRem.textContent = 'Preloading...';
+      // If no audio source is loaded, keep the time display at 0:00 (avoid overlapping UI).
+      try{
+        const hasSrc = !!(audio && audio.src);
+        if(mRem) mRem.textContent = hasSrc ? 'Preloading...' : fmt(0);
+        if(miniRem) miniRem.textContent = hasSrc ? 'Preloading...' : fmt(0);
+      }catch(e){
+        if(mRem) mRem.textContent = fmt(0);
+        if(miniRem) miniRem.textContent = fmt(0);
+      }
       // Only replace the hero title when a track is already loaded.
       // If nothing is loaded ("No song playing"), keep that text unchanged during preloading.
       try{ if(trackTitle && audio && audio.src) trackTitle.textContent = 'Preloading...'; }catch(e){}
@@ -306,9 +315,16 @@ function setPreloading(active){
           if(mCur) mCur.textContent = fmt(cur);
           if(miniCur) miniCur.textContent = fmt(cur);
           } else {
-            if(mRem) mRem.textContent = '';
-            if(miniRem) miniRem.textContent = '';
-            try{ const t = tracks[index]; if(t && trackTitle) trackTitle.textContent = t.title; }catch(e){}
+            // If no track is loaded, keep the UI in the "No song playing" state.
+            const hasSrc = !!(audio && audio.src);
+            if(mRem) mRem.textContent = hasSrc ? '' : fmt(0);
+            if(miniRem) miniRem.textContent = hasSrc ? '' : fmt(0);
+            try{
+              if(hasSrc){
+                const t = tracks[index];
+                if(t && trackTitle) trackTitle.textContent = t.title;
+              }
+            }catch(e){}
             // Re-enable mini controls only if an audio source is present (a track is loaded)
             try{
               if(audio && audio.src){
@@ -838,7 +854,19 @@ function setShuffleState(active){
   try{ if(mShuffle) mShuffle.setAttribute('aria-pressed', isShuffling? 'true':'false'); if(miniShuffle) miniShuffle.setAttribute('aria-pressed', isShuffling? 'true':'false'); }catch(e){}
   try{ localStorage.setItem('gb:shuffle', isShuffling?'1':'0') }catch(e){}
   // initialize or clear shuffle queue so automatic advances won't repeat until exhausted
-  try{ if(isShuffling) { shuffleQueue = buildShuffleQueue(index); shuffleCycleFinished = false; } else { shuffleQueue = []; shuffleCycleFinished = false; } }catch(e){}
+  try{
+    if(isShuffling) {
+      shuffleQueue = buildShuffleQueue(index);
+      shuffleCycleFinished = false;
+      shuffleHistory = [];
+      shuffleForward = [];
+    } else {
+      shuffleQueue = [];
+      shuffleCycleFinished = false;
+      shuffleHistory = [];
+      shuffleForward = [];
+    }
+  }catch(e){}
 }
 function toggleShuffle(){ setShuffleState(!isShuffling); }
 
@@ -902,8 +930,51 @@ function setLoopState(active){
 function toggleLoop(){ setLoopState(!(mLoop && mLoop.classList.contains('active'))); }
 
 function skip(dir){
-  // Prev/Next should always move sequentially. Shuffle only affects automatic transitions (on ended).
-  index = (index + dir + tracks.length) % tracks.length
+  if(!tracks || !tracks.length) return;
+
+  // When shuffle is enabled, Next/Prev should follow the shuffle order.
+  if(isShuffling){
+    try{
+      // next
+      if(dir > 0){
+        let nextIndex = null;
+        // if user previously hit Prev, allow Next to go forward through that history
+        if(shuffleForward && shuffleForward.length > 0){
+          nextIndex = shuffleForward.pop();
+        } else {
+          if(!shuffleQueue || shuffleQueue.length === 0){
+            shuffleQueue = buildShuffleQueue(index);
+          }
+          nextIndex = (shuffleQueue && shuffleQueue.length) ? shuffleQueue.shift() : null;
+        }
+        if(nextIndex === null || nextIndex === undefined) return;
+        if(shuffleHistory) shuffleHistory.push(index);
+        if(shuffleForward) shuffleForward = [];
+        index = nextIndex;
+      }
+      // prev
+      else if(dir < 0){
+        if(shuffleHistory && shuffleHistory.length > 0){
+          const prevIndex = shuffleHistory.pop();
+          if(shuffleForward) shuffleForward.push(index);
+          index = prevIndex;
+        } else {
+          // no history yet; fall back to a random pick (excluding current)
+          const q = buildShuffleQueue(index);
+          const prevIndex = (q && q.length) ? q[0] : index;
+          index = prevIndex;
+          shuffleQueue = buildShuffleQueue(index);
+          shuffleForward = [];
+        }
+      }
+    }catch(e){
+      // if shuffle logic fails for any reason, fall back to sequential
+      index = (index + dir + tracks.length) % tracks.length;
+    }
+  } else {
+    index = (index + dir + tracks.length) % tracks.length;
+  }
+
   // reset saved web offset when changing tracks
   webOffsetValid = false;
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
@@ -1045,6 +1116,7 @@ audio.addEventListener('ended',()=>{
       const nextIndex = shuffleQueue.shift();
       // if shifting this leaves the queue empty, mark that when this track ends we should exit
       if(shuffleQueue.length === 0){ shuffleCycleFinished = true; }
+      try{ if(shuffleHistory) shuffleHistory.push(index); if(shuffleForward) shuffleForward = []; }catch(e){}
       index = nextIndex;
       if(!modal.classList.contains('hidden')){
         loadTrack(index, {fade:'cross'});
