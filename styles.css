@@ -62,8 +62,40 @@ body::before{content:"";position:fixed;inset:-40px;background-image:url('images/
 .m-progress .times{display:flex;justify-content:space-between;color:var(--muted);font-size:.9rem;margin-bottom:8px}
 .m-progress input[type=range]{width:100%;accent-color:var(--accent)}
 
-/* Shared seek styling (main + mini) */
-.seek-common, .m-progress input[type=range]{-webkit-appearance:none;appearance:none;background:linear-gradient(90deg,var(--accent),var(--accent-2));height:14px;border-radius:10px;outline:none;background-repeat:no-repeat;background-size:100% 6px;background-position:center}
+/* Shared seek styling (main + mini)
+   Fill (left of thumb): accent gradient
+   Track (right of thumb): subtle grey */
+.seek-common, .m-progress input[type=range]{
+  -webkit-appearance:none;
+  appearance:none;
+  --seek-pct: 0%;
+  --seek-track: rgba(255,255,255,0.06);
+  height:14px;
+  border-radius:10px;
+  outline:none;
+  border:none;
+  background-color: transparent;
+  background-image:
+    linear-gradient(90deg,var(--accent),var(--accent-2)),
+    linear-gradient(90deg,var(--seek-track),var(--seek-track));
+  background-repeat:no-repeat;
+  background-size: var(--seek-pct) 6px, 100% 6px;
+  background-position: left center, left center;
+}
+
+/* Remove native white track so our background is what you see */
+.seek-common::-webkit-slider-runnable-track,
+.m-progress input[type=range]::-webkit-slider-runnable-track{
+  background: transparent;
+  border: none;
+  height:14px;
+}
+.seek-common::-moz-range-track,
+.m-progress input[type=range]::-moz-range-track{
+  background: transparent;
+  border: none;
+  height:14px;
+}
 .seek-common::-webkit-slider-thumb, .m-progress input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:white;border:2px solid rgba(0,0,0,0.25);box-shadow:0 2px 6px rgba(0,0,0,0.4);margin-top:0}
 .seek-common::-moz-range-thumb, .m-progress input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:white;border:2px solid rgba(0,0,0,0.25);box-shadow:0 2px 6px rgba(0,0,0,0.4)}
 .seek-common:focus{box-shadow:0 0 0 6px rgba(255,77,126,0.06)}

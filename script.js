@@ -37,6 +37,7 @@ const miniLoop = document.getElementById('miniLoop');
 const mDownload = document.getElementById('mDownload');
 const miniDownload = document.getElementById('miniDownload');
 const downloadAllBtn = document.getElementById('downloadAllBtn');
+const downloadAllLabel = document.getElementById('downloadAllLabel');
 const viewBtn = document.getElementById('viewBtn');
 const viewDropdown = document.getElementById('viewDropdown');
 
@@ -114,6 +115,34 @@ let loopScheduler = {
 };
 let nextPreloadedIndex = null;
 let nextSwitching = false;
+
+// Smooth playhead interpolation for <audio> element (non-WebAudio mode)
+let _audioTimeBase = 0;
+let _audioTimeStamp = 0;
+let _audioSeeking = false;
+
+function _nowMs(){
+  try{ return performance && typeof performance.now === 'function' ? performance.now() : Date.now(); }
+  catch(e){ return Date.now(); }
+}
+
+function getSmoothCurrentTime(){
+  try{
+    if(webPlaying && webSource && webSource.buffer) return getWebCurrentTime();
+    if(!audio) return 0;
+    const base = (typeof audio.currentTime === 'number' && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+    // if paused or seeking, trust the element's currentTime
+    if(audio.paused || _audioSeeking || !isPlaying) return base;
+    if(!_audioTimeStamp) return base;
+    const dt = (_nowMs() - _audioTimeStamp) / 1000;
+    const est = _audioTimeBase + Math.max(0, dt);
+    const dur = audio.duration;
+    if(dur && isFinite(dur)) return Math.max(0, Math.min(dur, est));
+    return Math.max(0, est);
+  }catch(e){
+    try{ return audio && audio.currentTime ? audio.currentTime : 0; }catch(e2){ return 0; }
+  }
+}
 
 // Decode and cache an audio file into an AudioBuffer for seamless looping
 function computeNextIndexForAuto(){
@@ -324,6 +353,7 @@ function setPreloading(active){
       if(mCur) mCur.textContent = fmt(0);
       if(miniCur) miniCur.textContent = fmt(0);
       try{ if(mSeek) { mSeek.value = 0; } if(miniSeek){ miniSeek.value = 0; } }catch(e){}
+      try{ setSeekPercent(0); }catch(e){}
       // If no audio source is loaded, disable mini controls during restore so they appear greyed.
       try{
         if(!audio || !audio.src){
@@ -852,15 +882,25 @@ function pause(){
   stopProgress();
 }
 
+function setSeekPercent(p){
+  try{
+    const pct = Math.max(0, Math.min(100, (typeof p === 'number' ? p : parseFloat(p)) || 0));
+    const v = pct.toFixed(3) + '%';
+    if(mSeek) mSeek.style.setProperty('--seek-pct', v);
+    if(miniSeek) miniSeek.style.setProperty('--seek-pct', v);
+  }catch(e){}
+}
+
 function startProgress(){
   if(progressRaf) return;
   const step = ()=>{
     // prefer WebAudio timing when an active web loop is running
     const dur = (webPlaying && webSource && webSource.buffer) ? webSource.buffer.duration : audio.duration;
     if(dur && isFinite(dur)){
-      const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : audio.currentTime;
+      const cur = getSmoothCurrentTime();
       const p = (cur/dur)*100;
       if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
+      setSeekPercent(p);
       if(mCur) mCur.textContent = fmt(cur);
       if(miniCur) miniCur.textContent = fmt(cur);
       if(mRem) mRem.textContent = (isFinite(dur)? fmt(dur) : '');
@@ -1070,17 +1110,21 @@ function clearPlaybackToNoSong(){
     if(mCover) mCover.src = def;
     if(coverImg) coverImg.src = def;
   }catch(e){}
+  try{ setSeekPercent(0); }catch(e){}
 }
 
 audio.addEventListener('timeupdate',()=>{
   // prefer WebAudio timing when web loop active
   const dur = (webPlaying && webSource && webSource.buffer) ? webSource.buffer.duration : audio.duration;
-  const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : audio.currentTime;
+  // update interpolation base for smoother rAF updates
+  try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
+  const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : getSmoothCurrentTime();
   if(dur){
     const p = (cur/dur)*100;
     // modal times
     if(mSeek) mSeek.value = p;
     if(miniSeek) miniSeek.value = p;
+    setSeekPercent(p);
     if(mCur) mCur.textContent = fmt(cur);
     // main player shows total duration; mini shows total as well
     if(mRem) mRem.textContent = (isFinite(dur) ? fmt(dur) : '');
@@ -1089,20 +1133,31 @@ audio.addEventListener('timeupdate',()=>{
   }
 });
 
+// keep interpolation state accurate around seeking/pausing
+try{
+  audio.addEventListener('seeking', ()=>{ _audioSeeking = true; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
+  audio.addEventListener('seeked', ()=>{ _audioSeeking = false; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
+  audio.addEventListener('pause', ()=>{ try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = 0; }catch(e){} });
+  audio.addEventListener('playing', ()=>{ try{ _audioSeeking = false; _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
+}catch(e){}
+
 // When metadata is loaded, initialize seek and time displays so they stay in sync
 audio.addEventListener('loadedmetadata', ()=>{
   // use WebAudio buffer duration when available
   const dur = (webPlaying && webSource && webSource.buffer) ? webSource.buffer.duration : audio.duration;
-  const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : audio.currentTime;
+  try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
+  const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : getSmoothCurrentTime();
   if(dur && isFinite(dur)){
     const p = (cur/dur)*100 || 0;
     if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
+    setSeekPercent(p);
     if(mCur) mCur.textContent = fmt(cur);
     mRem.textContent = fmt(dur);
     if(miniCur) miniCur.textContent = fmt(cur);
     if(miniRem) miniRem.textContent = fmt(dur);
   } else {
     if(mSeek) mSeek.value = 0; if(miniSeek) miniSeek.value = 0;
+    setSeekPercent(0);
     if(mCur) mCur.textContent = fmt(0);
     if(mRem) mRem.textContent = '';
     if(miniCur) miniCur.textContent = fmt(0);
@@ -1112,6 +1167,7 @@ audio.addEventListener('loadedmetadata', ()=>{
 
 mSeek.addEventListener('input',()=>{
   const percent = mSeek.value;
+  setSeekPercent(percent);
   try{
       if(webPlaying && webSource && webSource.buffer){
         const newOffset = (percent/100) * webSource.buffer.duration;
@@ -1122,10 +1178,12 @@ mSeek.addEventListener('input',()=>{
   // using the audio element for seeking — clear any saved web offset so resume uses audio.currentTime
   webOffsetValid = false;
   if(audio.duration){ audio.currentTime = (percent/100)*audio.duration }
+  try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
 });
 if(miniSeek){
   miniSeek.addEventListener('input',()=>{
     const percent = miniSeek.value;
+    setSeekPercent(percent);
       try{
         if(webPlaying && webSource && webSource.buffer){
           const newOffset = (percent/100) * webSource.buffer.duration;
@@ -1136,6 +1194,7 @@ if(miniSeek){
     // clear cached web offset when seeking via audio element
     webOffsetValid = false;
     if(audio.duration){ audio.currentTime = (percent/100)*audio.duration }
+    try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
   });
 }
 
@@ -1251,7 +1310,8 @@ async function downloadAllTracks(){
       const t = tracks[i];
       const url = encodeURI(t.file);
       try{
-        if(downloadAllBtn) downloadAllBtn.textContent = `Zipping ${i+1}/${tracks.length}`;
+        if(downloadAllLabel) downloadAllLabel.textContent = `Zipping ${i+1}/${tracks.length}`;
+        else if(downloadAllBtn) downloadAllBtn.textContent = `Zipping ${i+1}/${tracks.length}`;
         const res = await fetch(url);
         if(!res.ok) { console.warn('fetch failed', url, res.status); continue; }
         const blob = await res.blob();
@@ -1263,8 +1323,13 @@ async function downloadAllTracks(){
       // small delay to keep UI responsive
       await new Promise(r=>setTimeout(r,50));
     }
-    if(downloadAllBtn) downloadAllBtn.textContent = 'Compressing...';
-    const outBlob = await zip.generateAsync({type:'blob'}, (meta)=>{ if(downloadAllBtn) downloadAllBtn.textContent = `Compressing ${Math.round(meta.percent)}%`; });
+    if(downloadAllLabel) downloadAllLabel.textContent = 'Compressing...';
+    else if(downloadAllBtn) downloadAllBtn.textContent = 'Compressing...';
+    const outBlob = await zip.generateAsync({type:'blob'}, (meta)=>{
+      const txt = `Compressing ${Math.round(meta.percent)}%`;
+      if(downloadAllLabel) downloadAllLabel.textContent = txt;
+      else if(downloadAllBtn) downloadAllBtn.textContent = txt;
+    });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(outBlob);
     a.download = 'Gang Beasts OST.zip';
@@ -1273,7 +1338,13 @@ async function downloadAllTracks(){
     a.remove();
     URL.revokeObjectURL(a.href);
   }catch(e){ console.warn('downloadAllTracks failed', e); alert('Download failed'); }
-  finally{ if(downloadAllBtn){ downloadAllBtn.disabled = false; downloadAllBtn.textContent = 'Download All'; } }
+  finally{
+    if(downloadAllBtn){
+      downloadAllBtn.disabled = false;
+      if(downloadAllLabel) downloadAllLabel.textContent = 'Download All';
+      else downloadAllBtn.textContent = 'Download All';
+    }
+  }
 }
 
 // keyboard
