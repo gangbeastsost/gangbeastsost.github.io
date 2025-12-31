@@ -300,7 +300,7 @@
     "image": "images/Airship.png"
   },
   {
-    "title": "(Sunshine) Airport (from Mario Kart 8)",
+    "title": "Airport (Sunshine Airport from Mario Kart 8)",
     "artist": "Mario Kart Band",
     "file": "music/Airport.mp3",
     "image": "images/Airport.png"
@@ -310,6 +310,24 @@
     "artist": "RAFA120HOJAZ",
     "file": "music/LoafBread.mp3",
     "image": "images/LoafBread.png"
+  },
+  {
+    "title": "Donuts (SMB3 Athletic Theme Remix)",
+    "artist": "Paulygon",
+    "file": "music/Donuts.mp3",
+    "image": "images/Donuts.png"
+  },
+  {
+    "title": "MetalPipe (Metal Mario Theme from SM64)",
+    "artist": "Koji Kondo",
+    "file": "music/MetalPipe.mp3",
+    "image": "images/MetalPipe.png"
+  },
+  {
+    "title": "Tutorial",
+    "artist": "Bob Larder",
+    "file": "music/Tutorial.mp3",
+    "image": "images/Tutorial.png"
   },
   {
     "title": "Pause",
