@@ -199,7 +199,7 @@ button, .track{cursor:pointer}
 .top-actions{position:fixed;top:18px;right:18px;z-index:90;display:flex;gap:10px;align-items:center}
 
 /* Preload, Download All and View button styling (top-actions) */
-#preloadAllBtn, #downloadAllBtn, #githubBtn, .view-btn{
+#downloadAllBtn, #githubBtn, .view-btn{
   display:inline-flex;align-items:center;justify-content:center;gap:8px;
   /* dimmer appearance with same blur as mini-player */
   background: rgba(8,6,10,0.45);
@@ -212,12 +212,12 @@ button, .track{cursor:pointer}
   opacity:.92;
   box-shadow: 0 8px 28px rgba(0,0,0,0.55);
 }
-#downloadAllBtn:hover,#preloadAllBtn:hover,#githubBtn:hover,.view-btn:hover{opacity:1;transform:translateY(-3px);color:white;box-shadow:0 18px 48px rgba(0,0,0,0.6)}
-#downloadAllBtn:disabled,#preloadAllBtn:disabled,#githubBtn:disabled,.view-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.2)}
+#downloadAllBtn:hover,#githubBtn:hover,.view-btn:hover{opacity:1;transform:translateY(-3px);color:white;box-shadow:0 18px 48px rgba(0,0,0,0.6)}
+#downloadAllBtn:disabled,#githubBtn:disabled,.view-btn:disabled{opacity:.6;cursor:default;filter:grayscale(.2)}
 
 @media (max-width:700px){
   .top-actions{right:12px;top:12px}
-  #preloadAllBtn,#downloadAllBtn,#githubBtn{padding:8px 10px;font-size:13px}
+  #downloadAllBtn,#githubBtn{padding:8px 10px;font-size:13px}
 }
 
 /* Hide GitHub button on small screens and remove underline from its text */
@@ -227,54 +227,6 @@ button, .track{cursor:pointer}
 }
 
 #githubBtn{ text-decoration:none }
-
-#preloadAllBtn[data-tooltip]{position:relative}
-#preloadAllBtn[data-tooltip]::after{
-  content:attr(data-tooltip);
-  position:absolute;
-  left:50%;
-  top:calc(100% + 10px);
-  transform:translateX(-50%) translateY(-6px);
-  background: linear-gradient(90deg, rgba(0,0,0,0.45), rgba(20,6,40,0.45));
-  color: #fff;
-  padding:8px 10px;
-  border-radius:8px;
-  font-size:13px;
-  line-height:1.2;
-  white-space:normal;
-  max-width:300px;
-  text-overflow:ellipsis;
-  overflow-wrap:break-word;
-  box-shadow:0 10px 30px rgba(0,0,0,0.6);
-  opacity:0;
-  pointer-events:none;
-  transition:opacity .12s ease,transform .12s ease;
-  z-index:200;
-}
-#preloadAllBtn[data-tooltip]::before{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:calc(100% + 2px);
-  transform:translateX(-50%);
-  border:6px solid transparent;
-  border-bottom-color:rgba(20,6,40,0.45);
-  opacity:0;
-  transition:opacity .12s ease;
-  pointer-events:none;
-  z-index:200;
-}
-#preloadAllBtn[data-tooltip]:hover::after,#preloadAllBtn[data-tooltip]:focus::after{
-  opacity:1;
-  transform:translateX(-50%) translateY(0);
-}
-#preloadAllBtn[data-tooltip]:hover::before,#preloadAllBtn[data-tooltip]:focus::before{
-  opacity:1;
-}
-
-/* If tooltip is flipped to the right (button near edge), align tooltip's right edge to button */
-#preloadAllBtn.tooltip-right[data-tooltip]::after{ left:auto; right:0; transform:translateX(0) translateY(-6px); }
-#preloadAllBtn.tooltip-right[data-tooltip]::before{ left:auto; right:8px; transform:translateX(0); }
 
 /* Mirror tooltip styles for Download All button */
 #downloadAllBtn[data-tooltip]{position:relative}
@@ -323,6 +275,13 @@ button, .track{cursor:pointer}
 #downloadAllBtn.tooltip-right[data-tooltip]::after{ left:auto; right:0; transform:translateX(0) translateY(-6px); }
 #downloadAllBtn.tooltip-right[data-tooltip]::before{ left:auto; right:8px; transform:translateX(0); }
 
+/* Preloading toast */
+.preload-toast{position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:120;opacity:0;pointer-events:none;transition:opacity .16s ease, transform .16s ease}
+.preload-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.preload-toast__inner{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background: linear-gradient(90deg, rgba(0,0,0,0.45), rgba(20,6,40,0.45));border:1px solid rgba(255,255,255,0.04);backdrop-filter: blur(6px) saturate(0.95);-webkit-backdrop-filter: blur(6px) saturate(0.95);color:white;box-shadow:0 12px 40px rgba(0,0,0,0.6);font-size:14px;line-height:1.2}
+.preload-toast__spinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,0.22);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:0 0 auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* View button + dropdown styles */
 .view-wrap{position:relative;display:flex;align-items:center}
 .view-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;font-size:14px}
@@ -341,11 +300,11 @@ button, .track{cursor:pointer}
 .dropdown-item:hover{color:white;background:rgba(255,255,255,0.03)}
 
 @media (max-width:480px){
-  #preloadAllBtn[data-tooltip]::after{white-space:normal;max-width:200px;left:50%;right:12px}
+  /* (intentionally left blank) */
 }
 
 @media (prefers-reduced-motion:reduce){
-  #preloadAllBtn[data-tooltip]::after,#preloadAllBtn[data-tooltip]::before{transition:none}
+  /* (intentionally left blank) */
 }
 
 
