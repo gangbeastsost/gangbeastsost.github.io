@@ -17,4 +17,4 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 - Click on the cover for a song to open the fullscreen music player
 
 # Disclaimer
-I do not own the rights to any music on this website. All tracks are the property of their respective owners. This website has been made for entertainment purposes.
+I do not own the rights to any music on this website. All tracks are the property of their respective owners. This website has been made for entertainment purposes. 
