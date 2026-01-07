@@ -46,16 +46,6 @@ const preloadToastText = document.getElementById('preloadToastText');
 const HAS_MEDIA_SESSION = (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
 let _lastMediaPositionUpdateMs = 0;
 
-// iOS Safari suspends WebAudio in the background; use the <audio> element for looping there.
-const IS_IOS = (()=>{
-  try{
-    const ua = navigator && navigator.userAgent ? navigator.userAgent : '';
-    const iDevice = /iP(ad|hone|od)/.test(ua);
-    const iPadOS = (navigator && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    return !!(iDevice || iPadOS);
-  }catch(e){ return false; }
-})();
-
 let _preloadToastTimer = null;
 
 function showPreloadToast(msg){
@@ -149,7 +139,7 @@ function _seekToSeconds(targetSeconds){
     if(!dur || !isFinite(dur)) return;
     const clamped = Math.max(0, Math.min(dur, targetSeconds));
 
-    if(loopActive && buf && !IS_IOS){
+    if(loopActive && buf){
       if(isPlaying){
         switchToWebLoop(file, (clamped % dur));
       } else {
@@ -283,8 +273,6 @@ let shuffleForward = [];
 // WebAudio gapless loop support
 // Seamless WebAudio loop support disabled. Keeping no-op stubs so we can re-enable later if requested.
 let audioCtx = null;
-let _audioCtxHooked = false;
-let _wasPlayingBeforeBackground = false;
 const bufferCache = new Map();
 let webSource = null;
 let webGain = null;
@@ -312,62 +300,6 @@ function _nowMs(){
   try{ return performance && typeof performance.now === 'function' ? performance.now() : Date.now(); }
   catch(e){ return Date.now(); }
 }
-
-function hookAudioContext(){
-  try{
-    if(!audioCtx || _audioCtxHooked) return;
-    _audioCtxHooked = true;
-    audioCtx.onstatechange = ()=>{
-      try{
-        if(IS_IOS) return;
-        // On iOS Safari, backgrounding can suspend/interupt AudioContext.
-        // If that happens while we're "playing" via WebAudio loop, the UI can get out of sync.
-        const st = audioCtx && audioCtx.state;
-        if((st === 'suspended' || st === 'interrupted') && webPlaying && isPlaying){
-          _wasPlayingBeforeBackground = true;
-          try{ pause(); }catch(e){}
-        }
-      }catch(e){}
-    };
-  }catch(e){}
-}
-
-async function ensureAudioContextRunning(){
-  try{
-    if(!audioCtx) return true;
-    hookAudioContext();
-    if(audioCtx.state === 'running') return true;
-    if(typeof audioCtx.resume === 'function'){
-      await audioCtx.resume();
-      return audioCtx.state === 'running';
-    }
-    return false;
-  }catch(e){ return false; }
-}
-
-function handleBackgroundInterruption(){
-  try{
-    if(IS_IOS) return;
-    const loopActive = !!(mLoop && mLoop.classList.contains('active'));
-    if(!loopActive) return;
-    if(isPlaying) _wasPlayingBeforeBackground = true;
-    // Pause to keep UI and internal state consistent; this also captures webOffset.
-    try{ pause(); }catch(e){}
-  }catch(e){}
-}
-
-// iOS/Safari: switching apps can suspend WebAudio while UI still thinks it's playing.
-try{
-  document.addEventListener('visibilitychange', ()=>{
-    try{
-      if(document.hidden){
-        handleBackgroundInterruption();
-      }
-    }catch(e){}
-  });
-  window.addEventListener('pagehide', ()=>{ try{ handleBackgroundInterruption(); }catch(e){} });
-  window.addEventListener('blur', ()=>{ try{ handleBackgroundInterruption(); }catch(e){} });
-}catch(e){}
 
 function getSmoothCurrentTime(){
   try{
@@ -401,7 +333,6 @@ async function decodeFile(file){
     if(bufferCache.has(file)) return bufferCache.get(file);
     // lazy-create AudioContext
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    hookAudioContext();
     const res = await fetch(encodeURI(file));
     const ab = await res.arrayBuffer();
     const buf = await audioCtx.decodeAudioData(ab);
@@ -522,9 +453,6 @@ function switchToWebLoop(file, offset=0){
   try{
     if(!file) return false;
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    hookAudioContext();
-    // Best-effort resume (cannot await here). Actual resume is ensured in play().
-    try{ if(audioCtx && audioCtx.state !== 'running' && typeof audioCtx.resume === 'function') audioCtx.resume().catch(()=>{}); }catch(e){}
     const buf = bufferCache.get(file);
     if(!buf) return false;
     offset = Math.max(0, Math.min(offset, buf.duration || 0));
@@ -938,20 +866,10 @@ function loadTrack(i, opts={fade:'cross'}){
 async function play(){
   // if loop (gapless) mode enabled try to use WebAudio for seamless loop
   if(mLoop && mLoop.classList.contains('active')){
-    // iOS: always use <audio loop> so background playback keeps working.
-    if(IS_IOS){
-      try{ if(webPlaying) stopWebLoop(); }catch(e){}
-      try{ audio.loop = true; }catch(e){}
-      try{ await audio.play(); }catch(e){ console.warn('audio.play failed', e); }
-      isPlaying=true; mPlay.textContent='❚❚'; heroArt.classList.add('playing'); if(miniPlay) miniPlay.textContent='❚❚'; if(miniPlayer) miniPlayer.classList.remove('hidden'); startProgress();
-      try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
-      return;
-    }
     const file = tracks[index] && tracks[index].file;
     if(file){
             // if decoded already, start web loop immediately (using scheduler)
             try{
-            try{ await ensureAudioContextRunning(); }catch(e){}
             const cached = bufferCache.get(file);
             if(cached){
               const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
@@ -966,7 +884,6 @@ async function play(){
             const buf = await decodeFile(file);
             setPreloading(false);
             if(buf){
-              try{ await ensureAudioContextRunning(); }catch(e){}
               // start web loop at offset 0 (or current audio.currentTime if set)
               const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
               const started = switchToWebLoop(file, offset);
@@ -1078,26 +995,11 @@ function setLoopState(active){
   if(a){ setShuffleState(false); }
   if(mLoop) mLoop.classList.toggle('active', a);
   if(miniLoop) miniLoop.classList.toggle('active', a);
-  try{ audio.loop = a; }catch(e){}
+  audio.loop = a;
   try{ if(mLoop) mLoop.setAttribute('aria-pressed', a? 'true':'false'); if(miniLoop) miniLoop.setAttribute('aria-pressed', a? 'true':'false'); }catch(e){}
   try{ localStorage.setItem('gb:loop', a?'1':'0') }catch(e){}
   // loop is handled by the <audio> element only while seamless mode is disabled
   try{ audio.loop = a; }catch(e){}
-
-  // iOS: do NOT switch to WebAudio for looping because iOS suspends WebAudio in the background.
-  // Keep playback on the <audio> element so it can continue while switching apps.
-  if(IS_IOS){
-    try{
-      if(webPlaying){
-        const pos = getWebCurrentTime();
-        stopWebLoop();
-        try{ audio.currentTime = pos; }catch(e){}
-      }
-      // If currently playing, ensure <audio> is actually playing.
-      if(isPlaying){ try{ audio.play(); }catch(e){} }
-    }catch(e){}
-    return;
-  }
   // when disabling loop, stop any active WebAudio loop and transfer position back to the <audio> element
   if(!a){
     try{
@@ -1557,7 +1459,7 @@ document.addEventListener('keydown',(e)=>{
 
       const next = Math.min(dur, (cur + 10));
 
-      if(loopActive && buf && !IS_IOS){
+      if(loopActive && buf){
         // If we're actively playing, seek by restarting the WebAudio loop.
         if(isPlaying){
           switchToWebLoop(file, (next % dur));
@@ -1606,7 +1508,7 @@ document.addEventListener('keydown',(e)=>{
 
       const prev = Math.max(0, (cur - 10));
 
-      if(loopActive && buf && !IS_IOS){
+      if(loopActive && buf){
         if(isPlaying){
           switchToWebLoop(file, (prev % dur));
         } else {
