@@ -46,6 +46,36 @@ const preloadToastText = document.getElementById('preloadToastText');
 const HAS_MEDIA_SESSION = (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
 let _lastMediaPositionUpdateMs = 0;
 
+function isIOS(){
+  try{
+    const ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
+    const iThing = /iPad|iPhone|iPod/.test(ua);
+    const iPadOS13Plus = (navigator && navigator.platform === 'MacIntel' && navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
+    return !!(iThing || iPadOS13Plus);
+  }catch(e){ return false; }
+}
+
+function setupIOSPauseOnBackground(){
+  try{
+    if(!isIOS()) return;
+    const maybePause = ()=>{
+      try{
+        if(!audio || !audio.src) return;
+        const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+        if(!loopActive) return;
+        if(!isPlaying) return;
+        pause();
+      }catch(e){}
+    };
+
+    document.addEventListener('visibilitychange', ()=>{
+      try{ if(document.visibilityState === 'hidden') maybePause(); }catch(e){}
+    });
+    // iOS Safari reliably fires pagehide when switching away / app background
+    window.addEventListener('pagehide', ()=>{ maybePause(); });
+  }catch(e){}
+}
+
 let _preloadToastTimer = null;
 
 function showPreloadToast(msg){
@@ -585,6 +615,7 @@ function setPreloading(active){
 
 async function init(){
   try{ setupMediaSession(); }catch(e){}
+  try{ setupIOSPauseOnBackground(); }catch(e){}
   const resp = await fetch('tracks.json');
   tracks = await resp.json();
   // restore saved view filter (persisted across refreshes)
