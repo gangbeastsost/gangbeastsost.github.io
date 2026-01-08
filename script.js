@@ -123,7 +123,7 @@ function updateMediaSessionMetadata(t){
       return;
     }
     const art = t.image ? _absUrl(encodeURI(t.image)) : undefined;
-    navigator.mediaSession.metadata = new MediaMetadata({
+    const data = {
       title: t.title || '',
       artist: t.artist || '',
       album: 'Gang Beasts OST',
@@ -135,7 +135,10 @@ function updateMediaSessionMetadata(t){
         { src: art, sizes: '384x384' },
         { src: art, sizes: '512x512' }
       ] : []
-    });
+    };
+    // Some iPadOS/Safari builds are picky: use MediaMetadata when available, else assign plain object.
+    if(typeof MediaMetadata === 'function') navigator.mediaSession.metadata = new MediaMetadata(data);
+    else navigator.mediaSession.metadata = data;
   }catch(e){}
 }
 
@@ -393,6 +396,8 @@ function stopWebLoop(){
   webPlaying = false;
   webFile = null;
   webOffsetValid = false;
+  // If we were using <audio> as a muted media-session anchor, restore it.
+  try{ if(audio){ audio.muted = false; audio.loop = false; } }catch(e){}
 }
 function getWebCurrentTime(){
   try{
@@ -483,6 +488,7 @@ function switchToWebLoop(file, offset=0){
   try{
     if(!file) return false;
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    try{ if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') audioCtx.resume(); }catch(e){}
     const buf = bufferCache.get(file);
     if(!buf) return false;
     offset = Math.max(0, Math.min(offset, buf.duration || 0));
@@ -510,19 +516,12 @@ function switchToWebLoop(file, offset=0){
       // no fade-in when starting from idle — set target volume at start time
       gain.gain.setValueAtTime(targetVol, startTime);
     }
-    // mute <audio> element only if it was playing to avoid audible overlap when the web source starts
-    try{ if(audioIsPlaying && audio){ audio.muted = true; } }catch(e){}
+    // Keep <audio> as a muted anchor while WebAudio is active (helps iPadOS show lock-screen metadata).
+    try{ if(audio){ audio.muted = true; audio.loop = true; } }catch(e){}
     // start at offset at the scheduled time; let it loop indefinitely
     src.start(startTime, offset % buf.duration);
-    // after a short grace period, pause the <audio> element and restore muted state (keep paused)
-    try{
-      if(audioIsPlaying){
-        const toPauseMs = Math.max(30, Math.floor((startDelay + 0.02) * 1000));
-        setTimeout(()=>{
-          try{ if(audio){ audio.pause(); audio.muted = false; } }catch(e){}
-        }, toPauseMs);
-      }
-    }catch(e){}
+    // Ensure the media element is actually playing (muted) so iPadOS has an active media session.
+    try{ if(audio && audio.src){ audio.play().catch(()=>{}); } }catch(e){}
     // stop any previous web source
     try{ if(webSource){ try{ webSource.stop(); }catch(e){} try{ webSource.disconnect(); }catch(e){} } }catch(e){}
     webSource = src;
@@ -899,6 +898,12 @@ async function play(){
   if(mLoop && mLoop.classList.contains('active')){
     const file = tracks[index] && tracks[index].file;
     if(file){
+            // iOS/iPadOS can suspend AudioContext when backgrounded; resume on user gesture.
+            try{
+              if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') await audioCtx.resume();
+            }catch(e){}
+            try{ updateMediaSessionMetadata(tracks[index]); }catch(e){}
             // if decoded already, start web loop immediately (using scheduler)
             try{
             const cached = bufferCache.get(file);
