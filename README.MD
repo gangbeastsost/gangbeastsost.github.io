@@ -8,12 +8,12 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 - Custom made-up NON OFFICIAL names for tracks not officially released on [doseone's Bandcamp page](https://doseone.bandcamp.com/album/gang-beasts-original-soundtrack) for consistency. (Trawler, Train, Aquarium, Crane.)
 
 # Shortcuts
-- "L" enables looping
-- "Shift + right arrow" next song
-- "Shift + left arrow" previous song
-- "Spacebar" pause/play
-- "Left arrow" skip ahead 10/s
-- "Right arrow" backtrack 10/s
+- `L` enables looping
+- `Shift + right arrow` next song
+- `Shift + left arrow` previous song
+- `Spacebar` pause/play
+- `Left arrow` skip ahead 10/s
+- `Right arrow` backtrack 10/s
 - Click on the cover for a song to open the fullscreen music player
 
 # Sharing (Discord embeds)
