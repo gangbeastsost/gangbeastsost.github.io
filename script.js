@@ -4,6 +4,7 @@ const trackTitle = document.getElementById('trackTitle');
 const trackArtist = document.getElementById('trackArtist');
 const coverImg = document.getElementById('coverImg');
 const heroArt = document.getElementById('heroArt');
+const heroCopyLink = document.getElementById('heroCopyLink');
 
 // modal player elements
 const modal = document.getElementById('modal');
@@ -12,6 +13,7 @@ const modalBack = document.getElementById('modalBack');
 const mCover = document.getElementById('mCover');
 const mTitle = document.getElementById('mTitle');
 const mArtist = document.getElementById('mArtist');
+const mCopyLink = document.getElementById('mCopyLink');
 const mSeek = document.getElementById('mSeek');
 const mCur = document.getElementById('mCur');
 const mRem = document.getElementById('mRem');
@@ -25,6 +27,7 @@ const miniPlayer = document.getElementById('miniPlayer');
 const miniCover = document.getElementById('miniCover');
 const miniTitle = document.getElementById('miniTitle');
 const miniArtist = document.getElementById('miniArtist');
+const miniCopyLink = document.getElementById('miniCopyLink');
 const miniPlay = document.getElementById('miniPlay');
 const miniPrev = document.getElementById('miniPrev');
 const miniNext = document.getElementById('miniNext');
@@ -39,6 +42,7 @@ const downloadAllBtn = document.getElementById('downloadAllBtn');
 const downloadAllLabel = document.getElementById('downloadAllLabel');
 const viewBtn = document.getElementById('viewBtn');
 const viewDropdown = document.getElementById('viewDropdown');
+const searchInput = document.getElementById('searchInput');
 const preloadToast = document.getElementById('preloadToast');
 const preloadToastText = document.getElementById('preloadToastText');
 
@@ -74,6 +78,127 @@ function setupIOSPauseOnBackground(){
     // iOS Safari reliably fires pagehide when switching away / app background
     window.addEventListener('pagehide', ()=>{ maybePause(); });
   }catch(e){}
+}
+
+// Deep link support: reflect current track in URL as ?song=Stage-Side (e.g. ?song=Menu-A)
+function getSongParamForTrack(t){
+  try{
+    if(!t) return null;
+    const stage = (t.stage ? String(t.stage).trim() : '');
+    const side = (t.side ? String(t.side).trim() : '');
+    if(!stage || !side) return null;
+    return `${stage}-${side}`;
+  }catch(e){ return null; }
+}
+
+function setSongQueryParam(value){
+  try{
+    const url = new URL(window.location.href);
+    if(value){
+      url.searchParams.set('song', value);
+    } else {
+      url.searchParams.delete('song');
+    }
+    const next = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+    history.replaceState(null, '', next);
+  }catch(e){}
+}
+
+function getSongShareUrlForTrack(t){
+  try{
+    const songParam = getSongParamForTrack(t);
+    if(!songParam) return null;
+    // Match the share-page format used for Discord embeds.
+    return `${window.location.origin}/song/${encodeURIComponent(songParam)}`;
+  }catch(e){ return null; }
+}
+
+async function copyTextToClipboard(text){
+  try{
+    if(!text) return false;
+    if(navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  }catch(e){}
+
+  // Fallback (older Safari / non-secure contexts)
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand && document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  }catch(e){ return false; }
+}
+
+const _copiedBtnTimers = new WeakMap();
+
+function flashCopiedState(btn){
+  try{
+    if(!btn) return;
+    const prev = _copiedBtnTimers.get(btn);
+    if(prev) clearTimeout(prev);
+    btn.classList.add('copied');
+    const t = setTimeout(()=>{
+      try{ btn.classList.remove('copied'); }catch(e){}
+      try{ _copiedBtnTimers.delete(btn); }catch(e){}
+    }, 850);
+    _copiedBtnTimers.set(btn, t);
+  }catch(e){}
+}
+
+function _setCopyButtonState(btn, url){
+  try{
+    if(!btn) return;
+    const has = !!url;
+    btn.disabled = !has;
+    btn.title = has ? 'Copy link' : 'No share link for this track';
+    btn.setAttribute('aria-label', has ? 'Copy link' : 'No share link for this track');
+  }catch(e){}
+}
+
+function _setupStaticCopyButtons(){
+  try{
+    const onCopyCurrent = async (btn)=>{
+      try{
+        const t = (tracks && tracks[index]) ? tracks[index] : null;
+        const url = getSongShareUrlForTrack(t);
+        const ok = await copyTextToClipboard(url);
+        if(ok) flashCopiedState(btn);
+      }catch(e){}
+    };
+    if(heroCopyLink) heroCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(heroCopyLink); });
+    if(miniCopyLink) miniCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(miniCopyLink); });
+    if(mCopyLink) mCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(mCopyLink); });
+  }catch(e){}
+}
+
+function findTrackIndexBySongParam(songParam){
+  try{
+    if(!songParam || !tracks || !tracks.length) return -1;
+    const raw = String(songParam).trim();
+    if(!raw) return -1;
+    const dash = raw.lastIndexOf('-');
+    if(dash <= 0 || dash >= raw.length - 1) return -1;
+    const stage = raw.slice(0, dash).trim();
+    const side = raw.slice(dash + 1).trim();
+    if(!stage || !side) return -1;
+    for(let i=0;i<tracks.length;i++){
+      const t = tracks[i];
+      const s = (t.stage ? String(t.stage).trim() : '');
+      const sd = (t.side ? String(t.side).trim() : '');
+      if(s === stage && sd === side) return i;
+    }
+    return -1;
+  }catch(e){ return -1; }
 }
 
 let _preloadToastTimer = null;
@@ -241,6 +366,7 @@ let isShuffling = false;
 let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
+let searchQuery = '';
 
 const OFFICIAL_ARTIST = 'doseone & Bob Larder';
 
@@ -617,6 +743,19 @@ async function init(){
   try{ setupIOSPauseOnBackground(); }catch(e){}
   const resp = await fetch('tracks.json');
   tracks = await resp.json();
+
+  // Copy link buttons (hero/mini/modal)
+  try{ _setupStaticCopyButtons(); }catch(e){}
+
+  // Search bar
+  try{
+    if(searchInput){
+      searchInput.addEventListener('input', ()=>{
+        try{ searchQuery = String(searchInput.value || ''); }catch(e){ searchQuery = ''; }
+        try{ renderList(); }catch(e){}
+      });
+    }
+  }catch(e){}
   // restore saved view filter (persisted across refreshes)
   try{
     const saved = localStorage.getItem('gb:viewFilter');
@@ -652,6 +791,36 @@ async function init(){
     if(mArtist) mArtist.textContent = '';
     if(trackTitle) trackTitle.textContent = 'No song playing';
     if(trackArtist) trackArtist.textContent = '';
+    try{
+      _setCopyButtonState(heroCopyLink, null);
+      _setCopyButtonState(miniCopyLink, null);
+      _setCopyButtonState(mCopyLink, null);
+    }catch(e){}
+  }catch(e){}
+
+  // If a deep link is present, load that track (but don't autoplay).
+  try{
+    const url = new URL(window.location.href);
+    const songParam = url.searchParams.get('song');
+    const idx = findTrackIndexBySongParam(songParam);
+    if(idx >= 0){
+      loadTrack(idx, {fade:'in'});
+    }
+  }catch(e){}
+
+  // Modal persistence: if the user refreshed while the full-screen player was open, restore it.
+  // Never autoplay on restore.
+  try{
+    const modalOpen = localStorage.getItem('gb:modalOpen') === '1';
+    if(modalOpen){
+      let targetIndex = index;
+      const savedIdx = parseInt(localStorage.getItem('gb:modalIndex') || '', 10);
+      const hasLoaded = !!(audio && audio.src);
+      if(!hasLoaded && !Number.isNaN(savedIdx) && savedIdx >= 0 && savedIdx < tracks.length){
+        targetIndex = savedIdx;
+      }
+      openModal(targetIndex, { autoplay: false, restore: true });
+    }
   }catch(e){}
   // restore settings
   try{
@@ -786,6 +955,18 @@ function renderList(){
       }
     }catch(e){}
 
+    // apply search filter (matches across title/artist/stage/side/file)
+    try{
+      const q = (searchQuery || '').trim().toLowerCase();
+      if(q){
+        const hay = [t.title, t.artist, t.stage, t.side, t.file]
+          .filter(Boolean)
+          .map(v=>String(v).toLowerCase())
+          .join(' ');
+        if(!hay.includes(q)) return;
+      }
+    }catch(e){}
+
     const el = document.createElement('button');
     el.className = 'track';
     el.innerHTML = `<img src="${encodeURI(t.image)}" alt="cover"><div class="meta"><div class="title">${t.title}</div><div class="sub">${t.artist||''}</div></div>`;
@@ -869,6 +1050,15 @@ function loadTrack(i, opts={fade:'cross'}){
   try{ updateMediaSessionMetadata(t); }catch(e){}
   try{ updateMediaSessionPlaybackState(); }catch(e){}
   try{ updateMediaSessionPosition(true); }catch(e){}
+  try{ setSongQueryParam(getSongParamForTrack(t)); }catch(e){}
+
+  // update copy-link buttons (hero/mini/modal) for current track
+  try{
+    const url = getSongShareUrlForTrack(t);
+    _setCopyButtonState(heroCopyLink, url);
+    _setCopyButtonState(miniCopyLink, url);
+    _setCopyButtonState(mCopyLink, url);
+  }catch(e){}
   // clear no-song state when a real track is loaded
   try{
     if(miniPlayer) miniPlayer.classList.remove('no-song');
@@ -1177,6 +1367,16 @@ function clearPlaybackToNoSong(){
     if(mLoop) mLoop.disabled = true;
     if(mSeek) mSeek.disabled = true;
     if(miniSeek) miniSeek.disabled = true;
+
+    // copy-link buttons should be disabled when nothing is loaded
+    try{
+      _setCopyButtonState(heroCopyLink, null);
+      _setCopyButtonState(miniCopyLink, null);
+      _setCopyButtonState(mCopyLink, null);
+      if(heroCopyLink) heroCopyLink.classList.remove('copied');
+      if(miniCopyLink) miniCopyLink.classList.remove('copied');
+      if(mCopyLink) mCopyLink.classList.remove('copied');
+    }catch(e){}
   }catch(e){}
   try{ document.body.classList.remove('has-track'); }catch(e){}
   try{ 
@@ -1573,16 +1773,26 @@ document.addEventListener('keydown',(e)=>{
 
 // Modal open/close
 function openModal(i){
+  // Back-compat: openModal(i) defaults to autoplay.
+  const opts = (arguments.length > 1 && typeof arguments[1] === 'object' && arguments[1]) ? arguments[1] : {};
+  const autoplay = (opts.autoplay !== false);
+  if(!tracks || !tracks.length) return;
+  if(typeof i !== 'number' || i < 0 || i >= tracks.length) return;
   const t = tracks[i];
   const wasHidden = modal.classList.contains('hidden');
   if(wasHidden){
     modal.classList.remove('hidden');
     document.body.classList.add('modal-open');
+    try{ localStorage.setItem('gb:modalOpen','1'); localStorage.setItem('gb:modalIndex', String(i)); }catch(e){}
     // if different track or no source, load with fade-in; otherwise just fade the modalBg in
     if(index !== i || !audio.src){
       loadTrack(i, {fade:'in'});
-      play();
-      mPlay.textContent = '❚❚';
+      if(autoplay){
+        play();
+        mPlay.textContent = '❚❚';
+      } else {
+        mPlay.textContent = '▶';
+      }
     } else {
       // fade in existing background
       if(modalBg){ try{ modalBg.style.transition='opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){}; setTimeout(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} }, 30); }
@@ -1590,7 +1800,16 @@ function openModal(i){
     }
   } else {
     // modal already open: change track with crossfade unless same track
-    if(index !== i || !audio.src){ loadTrack(i, {fade:'cross'}); play(); mPlay.textContent='❚❚'; }
+    try{ localStorage.setItem('gb:modalOpen','1'); localStorage.setItem('gb:modalIndex', String(i)); }catch(e){}
+    if(index !== i || !audio.src){
+      loadTrack(i, {fade:'cross'});
+      if(autoplay){
+        play();
+        mPlay.textContent='❚❚';
+      } else {
+        mPlay.textContent='▶';
+      }
+    }
     else { mPlay.textContent = isPlaying ? '❚❚' : '▶'; }
   }
 }
@@ -1600,6 +1819,7 @@ function closeModal(){
   // play exit animation then hide
   if(!modal.classList.contains('hidden')){
     modal.classList.add('closing');
+    try{ localStorage.removeItem('gb:modalOpen'); localStorage.removeItem('gb:modalIndex'); }catch(e){}
     // fade out backgrounds
     try{ modalBg.style.transition = 'opacity 260ms ease'; modalBg.style.opacity = 0 }catch(e){}
     const bg2 = document.getElementById('modalBg2'); if(bg2) try{ bg2.style.transition='opacity 220ms ease'; bg2.style.opacity = 0 }catch(e){}
