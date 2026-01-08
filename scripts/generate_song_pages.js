@@ -1,12 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
 const tracksPath = path.join(root, 'tracks.json');
 const outDir = path.join(root, 'song');
+const ogImagesDir = path.join(root, 'images', 'og');
 
 // Used to build absolute OG urls (recommended for Discord). Keep in sync with your Pages domain.
 const SITE_URL = process.env.SITE_URL || 'https://gangbeastsost.github.io';
+
+const OG_SQUARE_SIZE = 300;
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -21,10 +25,80 @@ function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
+function _psQuote(s){
+  return `'${String(s).replace(/'/g, "''")}'`;
+}
+
+function ensureSquareOgImage(imageRel) {
+  try {
+    if (!imageRel) return null;
+    const rel = String(imageRel).replace(/^\/+/, '');
+    const srcAbs = path.join(root, rel);
+    if (!fs.existsSync(srcAbs)) return null;
+
+    const ext = path.extname(rel);
+    const base = path.basename(rel, ext);
+    const safeBase = base.replace(/[^a-z0-9_-]+/gi, '-');
+    const outRel = `images/og/${safeBase}-${OG_SQUARE_SIZE}.png`;
+    const outAbs = path.join(root, outRel);
+
+    ensureDir(ogImagesDir);
+
+    // Skip if already generated and up-to-date.
+    try {
+      if (fs.existsSync(outAbs)) {
+        const srcStat = fs.statSync(srcAbs);
+        const outStat = fs.statSync(outAbs);
+        if (outStat.mtimeMs >= srcStat.mtimeMs) {
+          return { outRel, width: OG_SQUARE_SIZE, height: OG_SQUARE_SIZE };
+        }
+      }
+    } catch (e) {}
+
+    // Windows-only crop via PowerShell + System.Drawing (keeps repo dependency-free).
+    if (process.platform !== 'win32') {
+      return { outRel: rel, width: null, height: null };
+    }
+
+    const ps = [
+      'Add-Type -AssemblyName System.Drawing;',
+      `$src=${_psQuote(srcAbs)};`,
+      `$dst=${_psQuote(outAbs)};`,
+      `$img=[System.Drawing.Image]::FromFile($src);`,
+      '$size=[Math]::Min($img.Width,$img.Height);',
+      '$x=[Math]::Floor(($img.Width-$size)/2);',
+      '$y=[Math]::Floor(($img.Height-$size)/2);',
+      `$out=${OG_SQUARE_SIZE};`,
+      '$bmp = New-Object System.Drawing.Bitmap $out,$out;',
+      '$g=[System.Drawing.Graphics]::FromImage($bmp);',
+      '$g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic;',
+      '$g.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::HighQuality;',
+      '$g.PixelOffsetMode=[System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality;',
+      '$dstRect = New-Object System.Drawing.Rectangle 0,0,$out,$out;',
+      '$srcRect = New-Object System.Drawing.Rectangle $x,$y,$size,$size;',
+      '$g.DrawImage($img, $dstRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel);',
+      '$bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png);',
+      '$g.Dispose(); $bmp.Dispose(); $img.Dispose();'
+    ].join(' ');
+
+    const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'inherit' });
+    if (r.status !== 0) {
+      return { outRel: rel, width: null, height: null };
+    }
+
+    return { outRel, width: OG_SQUARE_SIZE, height: OG_SQUARE_SIZE };
+  } catch (e) {
+    return null;
+  }
+}
+
 function writeSongPage({ songParam, title, artist, imageRel }) {
   const sharePath = `/song/${encodeURIComponent(songParam)}/`;
   const ogUrl = `${SITE_URL}${sharePath}`;
-  const ogImage = imageRel ? `${SITE_URL}/${imageRel.replace(/^\/+/, '')}` : `${SITE_URL}/images/headphones.png`;
+
+  const square = ensureSquareOgImage(imageRel);
+  const ogImageRel = (square && square.outRel) ? square.outRel : (imageRel ? imageRel.replace(/^\/+/, '') : 'images/headphones.png');
+  const ogImage = `${SITE_URL}/${ogImageRel.replace(/^\/+/, '')}`;
 
   const html = `<!doctype html>
 <html lang="en">
@@ -40,9 +114,11 @@ function writeSongPage({ songParam, title, artist, imageRel }) {
   <meta property="og:title" content="${escapeHtml(title)}" />
   <meta property="og:description" content="${escapeHtml(artist)}" />
   <meta property="og:image" content="${escapeHtml(ogImage)}" />
+  <meta property="og:image:width" content="${OG_SQUARE_SIZE}" />
+  <meta property="og:image:height" content="${OG_SQUARE_SIZE}" />
   <meta property="og:url" content="${escapeHtml(ogUrl)}" />
 
-  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="${escapeHtml(title)}" />
   <meta name="twitter:description" content="${escapeHtml(artist)}" />
   <meta name="twitter:image" content="${escapeHtml(ogImage)}" />
