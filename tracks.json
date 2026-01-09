@@ -386,7 +386,7 @@
   {
     "title": "Floating Ship Symphony",
     "stage": "Airship",
-    "side": "A",
+    "side": "Full",
     "artist": "Suno AI",
     "file": "music/Floating Ship Symphony.mp3",
     "image": "images/Airship.png"
@@ -394,7 +394,7 @@
   {
     "title": "Floating Ship Symphony (Game Version)",
     "stage": "Airship",
-    "side": "B",
+    "side": "Game",
     "artist": "Minimack Studios & Suno AI",
     "file": "music/Floating Ship Symphony (Game Version).mp3",
     "image": "images/Airship.png"
