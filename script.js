@@ -22,6 +22,9 @@ const mPrev = document.getElementById('mPrev');
 const mNext = document.getElementById('mNext');
 const mShuffle = document.getElementById('mShuffle');
 const mLoop = document.getElementById('mLoop');
+const mWaveform = document.getElementById('mWaveform');
+const waveformContainer = document.getElementById('waveformContainer');
+const waveformCanvas = document.getElementById('waveformCanvas');
 // mini player elements
 const miniPlayer = document.getElementById('miniPlayer');
 const miniCover = document.getElementById('miniCover');
@@ -45,6 +48,12 @@ const viewDropdown = document.getElementById('viewDropdown');
 const searchInput = document.getElementById('searchInput');
 const preloadToast = document.getElementById('preloadToast');
 const preloadToastText = document.getElementById('preloadToastText');
+const keyboardHint = document.getElementById('keyboardHint');
+const infoModal = document.getElementById('infoModal');
+const helpBtn = document.getElementById('helpBtn');
+const showHotkeysBtn = document.getElementById('showHotkeysBtn');
+const trackContextMenu = document.getElementById('trackContextMenu');
+let contextMenuTrackIndex = -1;
 
 // Media Session (lock screen / OS media controls)
 const HAS_MEDIA_SESSION = (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
@@ -368,6 +377,9 @@ window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
 let searchQuery = '';
 
+let recentlyPlayed = []; // Array of track indices (max 20)
+const MAX_RECENT = 20;
+
 const OFFICIAL_ARTIST = 'doseone & Bob Larder';
 
 // Also show the preloading toast during normal <audio> buffering.
@@ -433,6 +445,8 @@ let shuffleForward = [];
 // Seamless WebAudio loop support disabled. Keeping no-op stubs so we can re-enable later if requested.
 let audioCtx = null;
 const bufferCache = new Map();
+const MAX_CACHED_BUFFERS = 10;
+const bufferCacheOrder = []; // LRU tracking for cache eviction
 let webSource = null;
 let webGain = null;
 let webStartTime = 0;
@@ -481,6 +495,7 @@ function getSmoothCurrentTime(){
 // Decode and cache an audio file into an AudioBuffer for seamless looping
 function computeNextIndexForAuto(){
   try{
+    // If shuffling, use shuffle queue
     if(isShuffling && shuffleQueue && shuffleQueue.length>0) return shuffleQueue[0];
     return findNextAllowedIndex(index, 1);
   }catch(e){ return (index + 1) % tracks.length; }
@@ -489,24 +504,76 @@ function computeNextIndexForAuto(){
 async function decodeFile(file){
   if(!file) return null;
   try{
-    if(bufferCache.has(file)) return bufferCache.get(file);
+    if(bufferCache.has(file)){
+      // Move to end of LRU (most recently used)
+      const idx = bufferCacheOrder.indexOf(file);
+      if(idx !== -1) bufferCacheOrder.splice(idx, 1);
+      bufferCacheOrder.push(file);
+      return bufferCache.get(file);
+    }
     // lazy-create AudioContext
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const res = await fetch(encodeURI(file));
-    const ab = await res.arrayBuffer();
-    const buf = await audioCtx.decodeAudioData(ab);
-    bufferCache.set(file, buf);
-    return buf;
-  }catch(e){ console.warn('decodeFile failed', e); return null; }
+    
+    let retries = 2;
+    let lastError = null;
+    
+    while(retries > 0){
+      try{
+        const res = await fetch(encodeURI(file));
+        if(!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        const ab = await res.arrayBuffer();
+        const buf = await audioCtx.decodeAudioData(ab);
+        
+        // Evict oldest if cache is full
+        if(bufferCache.size >= MAX_CACHED_BUFFERS){
+          const oldest = bufferCacheOrder.shift();
+          if(oldest) bufferCache.delete(oldest);
+        }
+        
+        bufferCache.set(file, buf);
+        bufferCacheOrder.push(file);
+        return buf;
+      }catch(e){
+        lastError = e;
+        retries--;
+        if(retries > 0){
+          // Wait briefly before retry
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+    }
+    
+    console.warn('decodeFile failed after retries', file, lastError);
+    return null;
+  }catch(e){ 
+    console.warn('decodeFile failed', e); 
+    return null; 
+  }
 }
 
 function preloadNextTrack(){
   try{
     const nextIdx = computeNextIndexForAuto();
-    if(nextIdx===null || nextIdx===undefined) return;
-    nextPreloadedIndex = nextIdx;
-    const file = tracks[nextIdx] && tracks[nextIdx].file;
-    if(file) decodeFile(file).catch(()=>{});
+    if(nextIdx!==null && nextIdx!==undefined){
+      nextPreloadedIndex = nextIdx;
+      const file = tracks[nextIdx] && tracks[nextIdx].file;
+      if(file && !bufferCache.has(file)){
+        decodeFile(file).catch(()=>{});
+      }
+    }
+    
+    // Also preload previous track for instant back navigation
+    try{
+      const prevIdx = isShuffling ? 
+        (shuffleHistory && shuffleHistory.length ? shuffleHistory[shuffleHistory.length - 1] : null) : 
+        findNextAllowedIndex(index, -1);
+      if(prevIdx !== null && prevIdx !== undefined && prevIdx !== index){
+        const prevFile = tracks[prevIdx] && tracks[prevIdx].file;
+        if(prevFile && !bufferCache.has(prevFile)){
+          decodeFile(prevFile).catch(()=>{});
+        }
+      }
+    }catch(e){}
   }catch(e){}
 }
 // No-op stop
@@ -613,7 +680,16 @@ function scheduleLoopedBuffers(buf, startOffset=0){
 function switchToWebLoop(file, offset=0){
   try{
     if(!file) return false;
-    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Use the waveform's audioContext if it exists, otherwise create one
+    if(audioContext && !audioCtx){
+      audioCtx = audioContext;
+    } else if(!audioCtx && audioContext){
+      audioCtx = audioContext;
+    } else if(!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
     try{ if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') audioCtx.resume(); }catch(e){}
     const buf = bufferCache.get(file);
     if(!buf) return false;
@@ -624,7 +700,15 @@ function switchToWebLoop(file, offset=0){
     src.loop = true;
     const gain = audioCtx.createGain();
     gain.gain.value = (audio && typeof audio.volume !== 'undefined') ? audio.volume : 1;
-    src.connect(gain).connect(audioCtx.destination);
+    
+    // Connect to analyser for waveform visualization if available
+    if(analyser){
+      src.connect(gain);
+      gain.connect(analyser);
+    } else {
+      src.connect(gain).connect(audioCtx.destination);
+    }
+    
     // schedule start slightly in the future to coordinate a mute/pause transition and avoid overlap
     const now = audioCtx.currentTime;
     const audioIsPlaying = !!(audio && !audio.paused);
@@ -678,9 +762,7 @@ function setPreloading(active){
       // Never render long text here (it overlaps the seek UI). Keep duration at 0:00 while preloading.
       if(mRem) mRem.textContent = fmt(0);
       if(miniRem) miniRem.textContent = fmt(0);
-      // Only replace the hero title when a track is already loaded.
-      // If nothing is loaded ("No song playing"), keep that text unchanged during preloading.
-      try{ if(trackTitle && audio && audio.src) trackTitle.textContent = 'Preloading...'; }catch(e){}
+      // Don't change trackTitle during preloading - it should always show the actual track name
       if(mCur) mCur.textContent = fmt(0);
       if(miniCur) miniCur.textContent = fmt(0);
       try{ if(mSeek) { mSeek.value = 0; } if(miniSeek){ miniSeek.value = 0; } }catch(e){}
@@ -885,13 +967,126 @@ async function init(){
     }
   }catch(e){}
 
-  // Global hotkeys: L = loop toggle, Shift+ArrowRight = next, Shift+ArrowLeft = prev
+  // Global hotkeys: L = loop toggle, Shift+ArrowRight = next, Shift+ArrowLeft = prev, ? = show shortcuts
   try{
+    // Setup keyboard hint toggle
+    const toggleKeyboardHint = ()=>{
+      try{
+        if(!keyboardHint) return;
+        const isHidden = keyboardHint.getAttribute('aria-hidden') === 'true';
+        keyboardHint.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
+      }catch(e){}
+    };
+    
+    // Setup info modal toggle
+    const toggleInfoModal = ()=>{
+      try{
+        if(!infoModal) return;
+        const isHidden = infoModal.getAttribute('aria-hidden') === 'true';
+        infoModal.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
+      }catch(e){}
+    };
+    
+    // Help button opens info modal
+    if(helpBtn){
+      helpBtn.addEventListener('click', ()=>{
+        try{ toggleInfoModal(); }catch(e){}
+      });
+    }
+    
+    // "View Keyboard Shortcuts" button in info modal
+    if(showHotkeysBtn){
+      showHotkeysBtn.addEventListener('click', ()=>{
+        try{
+          toggleInfoModal(); // close info
+          setTimeout(()=>{ toggleKeyboardHint(); }, 100); // open hotkeys
+        }catch(e){}
+      });
+    }
+    
+    // Close keyboard hint on click
+    if(keyboardHint){
+      keyboardHint.addEventListener('click', (ev)=>{
+        if(ev.target === keyboardHint) toggleKeyboardHint();
+      });
+    }
+    
+    // Close info modal on click
+    if(infoModal){
+      infoModal.addEventListener('click', (ev)=>{
+        if(ev.target === infoModal) toggleInfoModal();
+      });
+    }
+    
+    // Context menu setup
+    if(trackContextMenu){
+      // Prevent menu clicks from closing it immediately
+      trackContextMenu.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const item = ev.target.closest('.context-menu__item');
+        if(!item) return;
+        const action = item.dataset.action;
+        const trackIndex = contextMenuTrackIndex;
+        
+        hideContextMenu();
+        
+        if(trackIndex < 0 || trackIndex >= tracks.length) return;
+        
+        try{
+          if(action === 'play'){
+            loadTrack(trackIndex, {fade:'in'});
+            play();
+          } else if(action === 'copyLink'){
+            const t = tracks[trackIndex];
+            const url = getSongShareUrlForTrack(t);
+            copyTextToClipboard(url);
+          } else if(action === 'download'){
+            const t = tracks[trackIndex];
+            const a = document.createElement('a');
+            a.href = encodeURI(t.file);
+            a.download = `${t.title}.mp3`;
+            a.click();
+          }
+        }catch(e){ console.warn('Context menu action failed', e); }
+      });
+    }
+    
+    // Click anywhere to close context menu (except on the menu itself)
+    document.addEventListener('click', (ev)=>{ 
+      if(!ev.target.closest('#trackContextMenu')){
+        hideContextMenu(); 
+      }
+    });
+    document.addEventListener('contextmenu', (ev)=>{
+      if(!ev.target.closest('.track')){
+        hideContextMenu();
+      }
+    });
+    
     document.addEventListener('keydown', (ev)=>{
       // ignore when focused on inputs or editable areas
       const tgt = ev.target || {};
       const tag = (tgt.tagName || '').toUpperCase();
       if(tag === 'INPUT' || tag === 'TEXTAREA' || tgt.isContentEditable) return;
+      
+      // ? key shows keyboard shortcuts
+      if(ev.key === '?' || (ev.shiftKey && ev.key === '/')){
+        try{ toggleKeyboardHint(); ev.preventDefault(); }catch(e){}
+        return;
+      }
+      
+      // ESC closes keyboard hint or info modal if visible
+      if(ev.key === 'Escape'){
+        if(keyboardHint && keyboardHint.getAttribute('aria-hidden') === 'false'){
+          try{ toggleKeyboardHint(); ev.preventDefault(); }catch(e){}
+          return;
+        }
+        if(infoModal && infoModal.getAttribute('aria-hidden') === 'false'){
+          try{ toggleInfoModal(); ev.preventDefault(); }catch(e){}
+          return;
+        }
+      }
+      
       if(ev.key === 'l' || ev.key === 'L'){
         try{ toggleLoop(); }catch(e){}
       }
@@ -970,6 +1165,19 @@ function renderList(){
     const el = document.createElement('button');
     el.className = 'track';
     el.innerHTML = `<img src="${encodeURI(t.image)}" alt="cover"><div class="meta"><div class="title">${t.title}</div><div class="sub">${t.artist||''}</div></div>`;
+    
+    // Right-click for context menu
+    el.addEventListener('contextmenu', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      try{
+        console.log('Context menu requested for track', i);
+        showContextMenu(ev.clientX, ev.clientY, i);
+      }catch(e){
+        console.error('Context menu error:', e);
+      }
+    });
+    
     // clicking the track loads/plays but DOES NOT open the modal
     el.addEventListener('click',()=>{
       try{
@@ -990,6 +1198,43 @@ function renderList(){
     }catch(e){}
     trackListEl.appendChild(el);
   })
+}
+
+function showContextMenu(x, y, trackIndex){
+  try{
+    console.log('showContextMenu called:', {x, y, trackIndex, menuElement: trackContextMenu});
+    if(!trackContextMenu) {
+      console.error('trackContextMenu element not found');
+      return;
+    }
+    contextMenuTrackIndex = trackIndex;
+    
+    // Position menu
+    trackContextMenu.style.left = `${x}px`;
+    trackContextMenu.style.top = `${y}px`;
+    trackContextMenu.classList.remove('hidden');
+    console.log('Context menu shown');
+    
+    // Adjust position if menu goes off-screen
+    setTimeout(()=>{
+      const rect = trackContextMenu.getBoundingClientRect();
+      if(rect.right > window.innerWidth){
+        trackContextMenu.style.left = `${window.innerWidth - rect.width - 10}px`;
+      }
+      if(rect.bottom > window.innerHeight){
+        trackContextMenu.style.top = `${window.innerHeight - rect.height - 10}px`;
+      }
+    }, 10);
+  }catch(e){
+    console.error('showContextMenu error:', e);
+  }
+}
+
+function hideContextMenu(){
+  try{
+    if(trackContextMenu) trackContextMenu.classList.add('hidden');
+    contextMenuTrackIndex = -1;
+  }catch(e){}
 }
 
 function loadTrack(i, opts={fade:'cross'}){
@@ -1077,9 +1322,17 @@ function loadTrack(i, opts={fade:'cross'}){
   }catch(e){}
   // mark page as having a loaded track so CSS shows download buttons
   try{ document.body.classList.add('has-track'); }catch(e){}
+  
+  // Update waveform visualization if active, pass the track image directly
+  if(waveformActive){
+    updateWaveformInfo(encodeURI(t.image));
+  }
   // remove this index from any pending shuffle queue so it won't repeat
   try{ if(shuffleQueue && shuffleQueue.length){ shuffleQueue = shuffleQueue.filter(x=>x!==index); } }catch(e){}
   try{ localStorage.setItem('gb:lastIndex', String(index)); }catch(e){}
+  
+  // Aggressively preload next and previous tracks immediately
+  try{ preloadNextTrack(); }catch(e){}
 }
 
 
@@ -1088,49 +1341,70 @@ async function play(){
   if(mLoop && mLoop.classList.contains('active')){
     const file = tracks[index] && tracks[index].file;
     if(file){
-            // iOS/iPadOS can suspend AudioContext when backgrounded; resume on user gesture.
-            try{
-              if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-              if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') await audioCtx.resume();
-            }catch(e){}
-            try{ updateMediaSessionMetadata(tracks[index]); }catch(e){}
-            // if decoded already, start web loop immediately (using scheduler)
-            try{
-            const cached = bufferCache.get(file);
-            if(cached){
-              const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
-              const started = switchToWebLoop(file, offset);
-              if(started){ isPlaying = true; mPlay.textContent='❚❚'; heroArt.classList.add('playing'); if(miniPlay) miniPlay.textContent='❚❚'; if(miniPlayer) miniPlayer.classList.remove('hidden'); startProgress(); preloadNextTrack(); try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} return; }
-            }
-          // not decoded yet or cached null — decode first and start via WebAudio to avoid <audio> preloading artifacts
-          // ensure any previous web loop is stopped to avoid overlap
-          if(webPlaying) stopWebLoop();
-          try{
-            setPreloading(true);
-            const buf = await decodeFile(file);
-            setPreloading(false);
-            if(buf){
-              // start web loop at offset 0 (or current audio.currentTime if set)
-              const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
-              const started = switchToWebLoop(file, offset);
-              if(started){ isPlaying = true; mPlay.textContent='❚❚'; heroArt.classList.add('playing'); if(miniPlay) miniPlay.textContent='❚❚'; if(miniPlayer) miniPlayer.classList.remove('hidden'); startProgress(); try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} return; }
-            }
-            // kicked off — preload next track as well
-            preloadNextTrack();
-          }catch(e){ setPreloading(false); console.warn('decode/play fallback failed', e); }
-          // fallback: play via <audio> if WebAudio start failed
-          try{ await audio.play(); }catch(e){}
-          // continue with fallback audio playback
-          isPlaying=true; mPlay.textContent='❚❚'; heroArt.classList.add('playing'); if(miniPlay) miniPlay.textContent='❚❚'; if(miniPlayer) miniPlayer.classList.remove('hidden'); startProgress();
-          try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
-          return;
-      }catch(e){ console.warn('play decode/start failed', e); }
+      // iOS/iPadOS can suspend AudioContext when backgrounded; resume on user gesture.
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') await audioCtx.resume();
+      }catch(e){}
+      try{ updateMediaSessionMetadata(tracks[index]); }catch(e){}
+      // if decoded already, start web loop immediately (using scheduler)
+      try{
+        const cached = bufferCache.get(file);
+        if(cached){
+          const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
+          const started = switchToWebLoop(file, offset);
+          if(started){ 
+            isPlaying = true; 
+            mPlay.textContent='❚❚'; 
+            heroArt.classList.add('playing'); 
+            if(miniPlay) miniPlay.textContent='❚❚'; 
+            if(miniPlayer) miniPlayer.classList.remove('hidden'); 
+            startProgress(); 
+            try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} 
+            return; 
+          }
+        }
+        // not decoded yet — decode first
+        if(webPlaying) stopWebLoop();
+        setPreloading(true);
+        const buf = await decodeFile(file);
+        setPreloading(false);
+        if(buf){
+          const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
+          const started = switchToWebLoop(file, offset);
+          if(started){ 
+            isPlaying = true; 
+            mPlay.textContent='❚❚'; 
+            heroArt.classList.add('playing'); 
+            if(miniPlay) miniPlay.textContent='❚❚'; 
+            if(miniPlayer) miniPlayer.classList.remove('hidden'); 
+            startProgress(); 
+            try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} 
+            return; 
+          }
+        }
+      }catch(e){ setPreloading(false); console.warn('decode/play failed, using fallback', e); }
+      // fallback to audio element
+      try{ await audio.play(); }catch(e){}
+      isPlaying=true; 
+      mPlay.textContent='❚❚'; 
+      heroArt.classList.add('playing'); 
+      if(miniPlay) miniPlay.textContent='❚❚'; 
+      if(miniPlayer) miniPlayer.classList.remove('hidden'); 
+      startProgress();
+      try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+      return;
     }
   }
-  // fallback: stop any web loop and use <audio>
+  // Non-loop mode: stop any web loop and use <audio>
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
   try{ await audio.play(); }catch(e){ console.warn('audio.play failed', e); }
-  isPlaying=true; mPlay.textContent='❚❚'; heroArt.classList.add('playing'); if(miniPlay) miniPlay.textContent='❚❚'; if(miniPlayer) miniPlayer.classList.remove('hidden'); startProgress();
+  isPlaying=true; 
+  mPlay.textContent='❚❚'; 
+  heroArt.classList.add('playing'); 
+  if(miniPlay) miniPlay.textContent='❚❚'; 
+  if(miniPlayer) miniPlayer.classList.remove('hidden'); 
+  startProgress();
   try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
 }
 
@@ -1335,8 +1609,57 @@ function skip(dir){
 
   // reset saved web offset when changing tracks
   webOffsetValid = false;
+  const targetFile = tracks[index] && tracks[index].file;
+  const isPreloaded = targetFile && bufferCache.has(targetFile);
+  
+  // Stop current WebAudio playback
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
-  // if modal is open, perform a crossfade; otherwise just load
+  
+  // If next track is preloaded and we're in a playing state, do instant switch
+  if(isPreloaded && isPlaying){
+    try{
+      // Update all UI first via loadTrack
+      if(!modal.classList.contains('hidden')){
+        loadTrack(index, {fade:'cross'});
+      } else {
+        loadTrack(index, {fade:'in'});
+      }
+      
+      // Now immediately start playback
+      const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+      if(loopActive){
+        // Use WebAudio for seamless loop
+        switchToWebLoop(targetFile, 0);
+        isPlaying = true;
+        mPlay.textContent='❚❚';
+        if(miniPlay) miniPlay.textContent='❚❚';
+        heroArt.classList.add('playing');
+        startProgress();
+      } else {
+        // Non-loop: use audio element which loadTrack already set up
+        audio.play().then(()=>{
+          isPlaying = true;
+          mPlay.textContent='❚❚';
+          if(miniPlay) miniPlay.textContent='❚❚';
+          heroArt.classList.add('playing');
+          if(miniPlayer) miniPlayer.classList.remove('hidden');
+          startProgress();
+          try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+        }).catch((e)=>{
+          console.warn('instant play failed', e);
+          // If autoplay fails, still update UI but paused
+          isPlaying = false;
+          mPlay.textContent='▶';
+          if(miniPlay) miniPlay.textContent='▶';
+        });
+      }
+      
+      try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+      return;
+    }catch(e){ console.warn('instant switch failed, falling back', e); }
+  }
+  
+  // Standard load path when not preloaded
   if(!modal.classList.contains('hidden')){
     loadTrack(index, {fade:'cross'});
   } else {
@@ -1769,6 +2092,21 @@ document.addEventListener('keydown',(e)=>{
     }catch(e){ try{ if(audio.duration) audio.currentTime = Math.max(0, (audio.currentTime||0) - 10); }catch(e){} }
     return;
   }
+  if(e.code === 'KeyV' || e.key === 'v' || e.key === 'V'){
+    e.preventDefault();
+    // Only allow waveform toggle when modal is open
+    if(mWaveform && !mWaveform.disabled && !modal.classList.contains('hidden')){
+      toggleWaveform();
+    }
+    return;
+  }
+  if(e.code === 'KeyS' || e.key === 's' || e.key === 'S'){
+    e.preventDefault();
+    if(mShuffle && !mShuffle.disabled){
+      toggleShuffle();
+    }
+    return;
+  }
 });
 
 // Modal open/close
@@ -1842,6 +2180,311 @@ function closeModal(){
 }
 
 modalBack.addEventListener('click',closeModal);
+
+// Waveform visualization
+let waveformActive = false;
+let waveformAnimating = false;
+let waveformTogglingLocked = false;
+let audioContext = null;
+let analyser = null;
+let audioSource = null;
+let waveformAnimationId = null;
+let waveformColors = ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
+
+function extractColorsFromImage(img){
+  try{
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width || 100;
+    canvas.height = img.height || 100;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    const colorCounts = {};
+    
+    // Sample every 10th pixel for performance
+    for(let i = 0; i < data.length; i += 40){
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      
+      // Only use lighter colors - skip very dark colors and very light ones
+      if(a < 128) continue;
+      const brightness = (r + g + b) / 3;
+      if(brightness < 80 || brightness > 240) continue; // Increased minimum brightness from 30 to 80
+      
+      // Round to reduce color variations
+      const key = `${Math.floor(r/20)*20},${Math.floor(g/20)*20},${Math.floor(b/20)*20}`;
+      colorCounts[key] = (colorCounts[key] || 0) + 1;
+    }
+    
+    // Get top 4 colors
+    const sorted = Object.entries(colorCounts).sort((a,b) => b[1] - a[1]);
+    const colors = [];
+    for(let i = 0; i < Math.min(4, sorted.length); i++){
+      const rgb = sorted[i][0].split(',');
+      colors.push(`rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.9)`);
+    }
+    
+    if(colors.length >= 2){
+      return colors;
+    }
+  }catch(e){
+    console.warn('Color extraction failed', e);
+  }
+  return ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
+}
+
+function initAudioContext(){
+  if(!audioContext){
+    try{
+      // If a loop context already exists, use it for waveform too
+      if(audioCtx){
+        audioContext = audioCtx;
+      } else {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioContext = new AudioContext();
+        audioCtx = audioContext;
+      }
+      
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 4096;
+      analyser.smoothingTimeConstant = 0.85;
+      
+      // Connect audio element to analyser
+      if(!audioSource){
+        audioSource = audioContext.createMediaElementSource(audio);
+        audioSource.connect(analyser);
+        analyser.connect(audioContext.destination);
+      }
+    }catch(e){
+      console.warn('Web Audio API not supported', e);
+    }
+  }
+}
+
+function drawWaveform(){
+  if(!waveformAnimating || !analyser || !waveformCanvas) return;
+  
+  const canvas = waveformCanvas;
+  const ctx = canvas.getContext('2d');
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  
+  // Set canvas size to match container
+  if(canvas.width !== canvas.offsetWidth || canvas.height !== canvas.offsetHeight){
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+  }
+  
+  const draw = ()=>{
+    if(!waveformAnimating) return;
+    waveformAnimationId = requestAnimationFrame(draw);
+    
+    analyser.getByteTimeDomainData(dataArray);
+    
+    // Clear canvas completely
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Create gradient from extracted colors
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    if(waveformColors.length === 2){
+      gradient.addColorStop(0, waveformColors[0]);
+      gradient.addColorStop(1, waveformColors[1]);
+    } else if(waveformColors.length === 3){
+      gradient.addColorStop(0, waveformColors[0]);
+      gradient.addColorStop(0.5, waveformColors[1]);
+      gradient.addColorStop(1, waveformColors[2]);
+    } else if(waveformColors.length >= 4){
+      gradient.addColorStop(0, waveformColors[0]);
+      gradient.addColorStop(0.33, waveformColors[1]);
+      gradient.addColorStop(0.66, waveformColors[2]);
+      gradient.addColorStop(1, waveformColors[3]);
+    }
+    
+    // Draw waveform
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = gradient;
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = waveformColors[0];
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    
+    const sliceWidth = canvas.width / bufferLength;
+    let x = 0;
+    const centerY = canvas.height / 2;
+    const amplitudeScale = 0.3;
+    const threshold = 0.15; // Minimum movement threshold
+    
+    for(let i = 0; i < bufferLength; i++){
+      let v = (dataArray[i] / 128.0) - 1; // -1 to 1 range
+      const absV = Math.abs(v);
+      
+      // Apply threshold - quiet parts barely move
+      if(absV < threshold){
+        v *= 0.5; // Dampen quiet sounds heavily
+      } else {
+        // Emphasize louder parts with exponential scaling
+        const sign = v < 0 ? -1 : 1;
+        v = sign * Math.pow(absV, 1.5) * 1.3; // Power scaling for louder emphasis
+      }
+      
+      const y = centerY + (v * centerY * amplitudeScale);
+      
+      if(i === 0){
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+      
+      x += sliceWidth;
+    }
+    
+    ctx.stroke();
+  };
+  
+  draw();
+}
+
+function toggleWaveform(){
+  // Prevent rapid toggling while animations are playing
+  if(waveformTogglingLocked) return;
+  waveformTogglingLocked = true;
+  
+  waveformActive = !waveformActive;
+  
+  if(waveformActive){
+    // Activate waveform mode
+    initAudioContext();
+    if(audioContext && audioContext.state === 'suspended'){
+      audioContext.resume();
+    }
+    
+    // If loop is active and playing, restart it to use the unified audioContext at current position
+    const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+    if(loopActive && webPlaying && index >= 0 && index < tracks.length){
+      const file = tracks[index].file;
+      const currentPos = getWebCurrentTime();
+      switchToWebLoop(file, currentPos);
+    }
+    
+    updateWaveformInfo();
+    
+    modal.classList.add('waveform-mode');
+    waveformContainer.classList.remove('hidden');
+    waveformContainer.classList.add('active');
+    mWaveform.classList.add('active');
+    mWaveform.setAttribute('aria-pressed', 'true');
+    document.documentElement.classList.add('waveform-active');
+    
+    waveformAnimating = true;
+    drawWaveform();
+    
+    // Unlock after animation completes (1s for entry)
+    setTimeout(() => { waveformTogglingLocked = false; }, 1000);
+  } else {
+    // Deactivate waveform mode
+    modal.classList.remove('waveform-mode');
+    waveformContainer.classList.remove('active');
+    mWaveform.classList.remove('active');
+    mWaveform.setAttribute('aria-pressed', 'false');
+    document.documentElement.classList.remove('waveform-active');
+    
+    // Stop animation after slide-down completes (1000ms for slideUpDramatic)
+    setTimeout(()=>{
+      waveformAnimating = false;
+      if(waveformAnimationId){
+        cancelAnimationFrame(waveformAnimationId);
+        waveformAnimationId = null;
+      }
+      
+      // Remove top info
+      const topInfo = waveformContainer.querySelector('.waveform-top-info');
+      if(topInfo) topInfo.remove();
+      
+      if(!waveformActive) waveformContainer.classList.add('hidden');
+      
+      // Unlock after exit animation completes
+      waveformTogglingLocked = false;
+    }, 1000);
+  }
+}
+
+function updateWaveformInfo(imageSrc = null){
+  if(!waveformActive) return;
+  
+  // Use provided image source or fall back to mCover
+  const imgSrc = imageSrc || (mCover && mCover.src);
+  
+  if(imgSrc){
+    // Preload the new image first
+    const img = new Image();
+    img.onload = ()=>{
+      waveformContainer.style.backgroundImage = `url(${imgSrc})`;
+      
+      // Extract colors immediately after image loads
+      const newColors = extractColorsFromImage(img);
+      if(newColors && newColors.length >= 2){
+        waveformColors = newColors;
+      }
+    };
+    img.src = imgSrc;
+  }
+  
+  // Check if top info already exists
+  let topInfo = waveformContainer.querySelector('.waveform-top-info');
+  
+  if(topInfo){
+    // Crossfade existing content
+    const coverEl = topInfo.querySelector('.waveform-top-info__cover');
+    const titleEl = topInfo.querySelector('.waveform-top-info__title');
+    const artistEl = topInfo.querySelector('.waveform-top-info__artist');
+    
+    // Fade out
+    if(coverEl) coverEl.style.opacity = '0';
+    if(titleEl) titleEl.style.opacity = '0';
+    if(artistEl) artistEl.style.opacity = '0';
+    
+    // Update content and fade back in after transition
+    setTimeout(()=>{
+      if(coverEl) coverEl.src = imgSrc || mCover.src;
+      if(titleEl) titleEl.textContent = mTitle.textContent;
+      if(artistEl) artistEl.textContent = mArtist.textContent;
+      
+      // Fade in
+      requestAnimationFrame(()=>{
+        if(coverEl) coverEl.style.opacity = '1';
+        if(titleEl) titleEl.style.opacity = '1';
+        if(artistEl) artistEl.style.opacity = '1';
+      });
+    }, 400);
+  } else {
+    // Create new top info display (first time)
+    topInfo = document.createElement('div');
+    topInfo.className = 'waveform-top-info';
+    topInfo.innerHTML = `
+      <img src="${imgSrc || mCover.src}" alt="cover" class="waveform-top-info__cover">
+      <div class="waveform-top-info__title">${mTitle.textContent}</div>
+      <div class="waveform-top-info__artist">${mArtist.textContent}</div>
+    `;
+    waveformContainer.appendChild(topInfo);
+  }
+}
+
+if(mWaveform){
+  mWaveform.addEventListener('click', toggleWaveform);
+}
+
+// ESC key handler for waveform mode
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape' && waveformActive){
+    e.preventDefault();
+    toggleWaveform();
+  }
+});
 
 // Persist scroll position: save periodically during scroll and on page hide/unload
 try{

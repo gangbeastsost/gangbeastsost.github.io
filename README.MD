@@ -7,9 +7,13 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 - Music from custom maps, such as [Airship](https://thunderstore.io/c/gang-beasts/p/MinimackStudios/Airship/), [Airport](https://thunderstore.io/c/gang-beasts/p/konradKG25/Airport/), and more.
 - Custom made-up NON OFFICIAL names for tracks not officially released on [doseone's Bandcamp page](https://doseone.bandcamp.com/album/gang-beasts-original-soundtrack) for consistency. (Trawler, Train, Aquarium, Crane.)
 - [Sharing](https://github.com/gangbeastsost/gangbeastsost.github.io/tree/main?tab=readme-ov-file#sharing-discord-embeds)
+- Waveform Visualization
 
 # Shortcuts
-- `L` enables looping
+- `L` toggles looping
+- `S` toggles shuffle
+- `V` toggles waveform
+- `?` opens the shortcuts modal
 - `Shift + right arrow` next song
 - `Shift + left arrow` previous song
 - `Spacebar` pause/play
