@@ -8,7 +8,7 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 - Custom made-up NON OFFICIAL names for tracks not officially released on [doseone's Bandcamp page](https://doseone.bandcamp.com/album/gang-beasts-original-soundtrack) for consistency. (Trawler, Train, Aquarium, Crane.)
 - [Sharing](https://github.com/gangbeastsost/gangbeastsost.github.io/tree/main?tab=readme-ov-file#sharing-discord-embeds)
 - Waveform Visualization
-
+ 
 # Shortcuts
 - `L` toggles looping
 - `S` toggles shuffle
