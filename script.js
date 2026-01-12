@@ -2185,6 +2185,7 @@ modalBack.addEventListener('click',closeModal);
 let waveformActive = false;
 let waveformAnimating = false;
 let waveformTogglingLocked = false;
+let visualizationMode = 'spectrum'; // 'spectrum' or 'waveform'
 let audioContext = null;
 let analyser = null;
 let audioSource = null;
@@ -2220,12 +2221,16 @@ function extractColorsFromImage(img){
       colorCounts[key] = (colorCounts[key] || 0) + 1;
     }
     
-    // Get top 4 colors
+    // Get top 4 colors and brighten them
     const sorted = Object.entries(colorCounts).sort((a,b) => b[1] - a[1]);
     const colors = [];
     for(let i = 0; i < Math.min(4, sorted.length); i++){
-      const rgb = sorted[i][0].split(',');
-      colors.push(`rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.9)`);
+      const rgb = sorted[i][0].split(',').map(Number);
+      // Brighten colors by 30%
+      const r = Math.min(255, Math.floor(rgb[0] * 1.2));
+      const g = Math.min(255, Math.floor(rgb[1] * 1.2));
+      const b = Math.min(255, Math.floor(rgb[2] * 1.2));
+      colors.push(`rgba(${r}, ${g}, ${b}, 0.9)`);
     }
     
     if(colors.length >= 2){
@@ -2283,67 +2288,115 @@ function drawWaveform(){
     if(!waveformAnimating) return;
     waveformAnimationId = requestAnimationFrame(draw);
     
-    analyser.getByteTimeDomainData(dataArray);
-    
     // Clear canvas completely
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Create gradient from extracted colors
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-    if(waveformColors.length === 2){
-      gradient.addColorStop(0, waveformColors[0]);
-      gradient.addColorStop(1, waveformColors[1]);
-    } else if(waveformColors.length === 3){
-      gradient.addColorStop(0, waveformColors[0]);
-      gradient.addColorStop(0.5, waveformColors[1]);
-      gradient.addColorStop(1, waveformColors[2]);
-    } else if(waveformColors.length >= 4){
-      gradient.addColorStop(0, waveformColors[0]);
-      gradient.addColorStop(0.33, waveformColors[1]);
-      gradient.addColorStop(0.66, waveformColors[2]);
-      gradient.addColorStop(1, waveformColors[3]);
-    }
-    
-    // Draw waveform
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = gradient;
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = waveformColors[0];
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    
-    const sliceWidth = canvas.width / bufferLength;
-    let x = 0;
-    const centerY = canvas.height / 2;
-    const amplitudeScale = 0.3;
-    const threshold = 0.15; // Minimum movement threshold
-    
-    for(let i = 0; i < bufferLength; i++){
-      let v = (dataArray[i] / 128.0) - 1; // -1 to 1 range
-      const absV = Math.abs(v);
+    if(visualizationMode === 'spectrum'){
+      // Spectrum analyzer mode
+      analyser.getByteFrequencyData(dataArray);
       
-      // Apply threshold - quiet parts barely move
-      if(absV < threshold){
-        v *= 0.5; // Dampen quiet sounds heavily
-      } else {
-        // Emphasize louder parts with exponential scaling
-        const sign = v < 0 ? -1 : 1;
-        v = sign * Math.pow(absV, 1.5) * 1.3; // Power scaling for louder emphasis
+      // Create gradient from extracted colors (vertical)
+      const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+      if(waveformColors.length === 2){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(1, waveformColors[1]);
+      } else if(waveformColors.length === 3){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(0.5, waveformColors[1]);
+        gradient.addColorStop(1, waveformColors[2]);
+      } else if(waveformColors.length >= 4){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(0.33, waveformColors[1]);
+        gradient.addColorStop(0.66, waveformColors[2]);
+        gradient.addColorStop(1, waveformColors[3]);
       }
       
-      const y = centerY + (v * centerY * amplitudeScale);
+      // Draw spectrum bars (reduced from 85 to 64 for better performance)
+      const barCount = 64;
+      const barWidth = (canvas.width / barCount) * 0.85;
+      const barSpacing = (canvas.width / barCount) * 0.15;
       
-      if(i === 0){
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
+      ctx.fillStyle = gradient;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = waveformColors[0];
+      
+      for(let i = 0; i < barCount; i++){
+        // Sample from frequency data (focus on lower-mid frequencies)
+        const dataIndex = Math.floor((i / barCount) * (bufferLength * 0.6));
+        const value = dataArray[dataIndex] / 255.0;
+        
+        // Apply exponential scaling for more dynamic visualization
+        const scaledValue = Math.pow(value, 0.7);
+        const barHeight = scaledValue * canvas.height * 0.85;
+        
+        const x = i * (barWidth + barSpacing);
+        const y = canvas.height - barHeight;
+        
+        // Draw bar with rounded top
+        ctx.beginPath();
+        const radius = Math.min(barWidth / 2, 8);
+        ctx.roundRect(x, y, barWidth, barHeight, [radius, radius, 0, 0]);
+        ctx.fill();
+      }
+    } else {
+      // Waveform mode
+      analyser.getByteTimeDomainData(dataArray);
+      
+      // Create gradient from extracted colors (horizontal)
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+      if(waveformColors.length === 2){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(1, waveformColors[1]);
+      } else if(waveformColors.length === 3){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(0.5, waveformColors[1]);
+        gradient.addColorStop(1, waveformColors[2]);
+      } else if(waveformColors.length >= 4){
+        gradient.addColorStop(0, waveformColors[0]);
+        gradient.addColorStop(0.33, waveformColors[1]);
+        gradient.addColorStop(0.66, waveformColors[2]);
+        gradient.addColorStop(1, waveformColors[3]);
       }
       
-      x += sliceWidth;
+      // Draw waveform
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = gradient;
+      ctx.shadowBlur = 30;
+      ctx.shadowColor = waveformColors[0];
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      
+      const sliceWidth = canvas.width / bufferLength;
+      let x = 0;
+      const centerY = canvas.height / 2;
+      const amplitudeScale = 0.3;
+      const threshold = 0.15;
+      
+      for(let i = 0; i < bufferLength; i++){
+        let v = (dataArray[i] / 128.0) - 1;
+        const absV = Math.abs(v);
+        
+        if(absV < threshold){
+          v *= 0.5;
+        } else {
+          const sign = v < 0 ? -1 : 1;
+          v = sign * Math.pow(absV, 1.5) * 1.3;
+        }
+        
+        const y = centerY + (v * centerY * amplitudeScale);
+        
+        if(i === 0){
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+        
+        x += sliceWidth;
+      }
+      
+      ctx.stroke();
     }
-    
-    ctx.stroke();
   };
   
   draw();
@@ -2476,6 +2529,30 @@ function updateWaveformInfo(imageSrc = null){
 
 if(mWaveform){
   mWaveform.addEventListener('click', toggleWaveform);
+  
+  // Load saved visualization mode
+  try{
+    const savedMode = localStorage.getItem('gb:vizMode');
+    if(savedMode === 'waveform' || savedMode === 'spectrum'){
+      visualizationMode = savedMode;
+    }
+  }catch(e){}
+}
+
+// Visualization mode toggle button
+const vizModeToggle = document.getElementById('vizModeToggle');
+const vizToggleLabel = document.querySelector('.viz-toggle-label');
+if(vizModeToggle && vizToggleLabel){
+  // Initialize checkbox state and label based on saved mode
+  vizModeToggle.checked = (visualizationMode === 'waveform');
+  vizToggleLabel.textContent = visualizationMode === 'waveform' ? 'Waveform' : 'Spectrum';
+  
+  vizModeToggle.addEventListener('change', (e)=>{
+    visualizationMode = e.target.checked ? 'waveform' : 'spectrum';
+    vizToggleLabel.textContent = visualizationMode === 'waveform' ? 'Waveform' : 'Spectrum';
+    try{ localStorage.setItem('gb:vizMode', visualizationMode); }catch(e){}
+    console.log('Visualization mode changed to:', visualizationMode);
+  });
 }
 
 // ESC key handler for waveform mode
