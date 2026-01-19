@@ -8,7 +8,7 @@ const outDir = path.join(root, 'song');
 const ogImagesDir = path.join(root, 'images', 'og');
 
 // Used to build absolute OG urls (recommended for Discord). Keep in sync with your Pages domain.
-const SITE_URL = process.env.SITE_URL || 'https://gangbeastsost.github.io';
+const SITE_URL = process.env.SITE_URL || 'https://gangbeastsost.net';
 
 const OG_SQUARE_SIZE = 300;
 

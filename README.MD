@@ -25,7 +25,7 @@ A fast, intuitive, and responsive website to listen to the Gang Beasts OST with 
 Discord previews don’t run page JavaScript, so links like `/?song=Menu-A` can’t show per-song OpenGraph data on GitHub Pages.
 
 Use the dedicated share pages instead (these will be the format they are copied in if you copy links with the copy button next to the title of the song):
-- `https://gangbeastsost.github.io/song/Menu-A/` (example)
+- `https://gangbeastsost.net/song/Menu-A/` (example)
 
 # Disclaimer
 I do not own the rights to any music on this website. All tracks are the property of their respective owners. This website has been made for entertainment purposes. 
