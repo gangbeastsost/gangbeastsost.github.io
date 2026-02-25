@@ -95,24 +95,96 @@ function isIOS(){
   }catch(e){ return false; }
 }
 
+// Lazily wire onstatechange on an AudioContext so iOS 'interrupted'/'suspended'
+// states are handled without requiring a user gesture to restart.
+function _wireAudioCtxStateChange(ctx){
+  try{
+    if(!ctx || ctx._gbStateWired) return;
+    ctx._gbStateWired = true;
+    ctx.onstatechange = ()=>{
+      try{
+        // iOS fires 'interrupted' when another app takes audio focus or the session ends.
+        if(ctx.state === 'interrupted' || ctx.state === 'suspended'){
+          if(isPlaying && loopMode === 'one' && webPlaying){
+            // WebAudio is suspended/interrupted — can't hear a thing.
+            // Fall back to native <audio> loop so background audio continues.
+            _iosFallbackToNativeLoop();
+          }
+          // Always try to resume (will succeed once a user gesture is available).
+          try{ ctx.resume().catch(()=>{}); }catch(e){}
+        }
+        if(ctx.state === 'running' && isPlaying && loopMode === 'one' && !webPlaying){
+          // Context recovered — try to restore gapless WebAudio loop.
+          _iosRestoreWebLoop();
+        }
+      }catch(e){}
+    };
+  }catch(e){}
+}
+
+function _iosFallbackToNativeLoop(){
+  try{
+    if(!audio || !tracks[index]) return;
+    const pos = webPlaying ? getWebCurrentTime() : (audio.currentTime || 0);
+    stopWebLoop();
+    audio.muted = false;
+    audio.loop = (loopMode === 'one');
+    try{ audio.currentTime = pos; }catch(e){}
+    audio.play().catch(()=>{});
+  }catch(e){}
+}
+
+function _iosRestoreWebLoop(){
+  try{
+    if(!isPlaying || loopMode !== 'one' || webPlaying) return;
+    if(!audio || audio.paused) return;
+    const file = tracks[index] && tracks[index].file;
+    if(!file || !bufferCache.has(file)) return;
+    const pos = audio.currentTime || 0;
+    const started = switchToWebLoop(file, pos);
+    if(started){ audio.muted = true; audio.loop = true; }
+  }catch(e){}
+}
+
 function setupIOSPauseOnBackground(){
   try{
-    if(!isIOS()) return;
-    const maybePause = ()=>{
+    // Handle page hide: if WebAudio loop is running, switch to native audio
+    // so iOS can continue playing audio in background (WebAudio gets suspended).
+    const handleHide = ()=>{
       try{
-        if(!audio || !audio.src) return;
-        const loopActive = loopMode === 'one';
-        if(!loopActive) return;
         if(!isPlaying) return;
-        pause();
+        if(loopMode === 'one' && webPlaying){
+          _iosFallbackToNativeLoop();
+        }
+        // For non-loop mode, the <audio> element owns playback; no action needed.
+        // (createMediaElementSource routes audio through AudioContext — if that
+        // context suspends, try to resume it when we come back.)
+      }catch(e){}
+    };
+
+    const handleShow = ()=>{
+      try{
+        // Try to resume any suspended AudioContext immediately.
+        [audioCtx, audioContext].forEach(ctx=>{
+          try{ if(ctx && ctx.state !== 'running') ctx.resume().catch(()=>{}); }catch(e){}
+        });
+        // If we fell back to native audio loop while hidden, restore WebAudio.
+        if(isPlaying && loopMode === 'one' && !webPlaying){
+          // Small delay — wait for context resume to take effect.
+          setTimeout(()=>{ try{ _iosRestoreWebLoop(); }catch(e){} }, 200);
+        }
       }catch(e){}
     };
 
     document.addEventListener('visibilitychange', ()=>{
-      try{ if(document.visibilityState === 'hidden') maybePause(); }catch(e){}
+      try{
+        if(document.visibilityState === 'hidden') handleHide();
+        else handleShow();
+      }catch(e){}
     });
-    // iOS Safari reliably fires pagehide when switching away / app background
-    window.addEventListener('pagehide', ()=>{ maybePause(); });
+    // pagehide/pageshow fire more reliably on iOS Safari than visibilitychange.
+    window.addEventListener('pagehide', ()=>{ try{ handleHide(); }catch(e){} });
+    window.addEventListener('pageshow', ()=>{ try{ handleShow(); }catch(e){} });
   }catch(e){}
 }
 
@@ -1048,6 +1120,8 @@ function switchToWebLoop(file, offset=0){
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
     
+    // Wire iOS state-change handler on first use.
+    try{ _wireAudioCtxStateChange(audioCtx); }catch(e){}
     try{ if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') audioCtx.resume(); }catch(e){}
     const buf = bufferCache.get(file);
     if(!buf) return false;
@@ -3387,6 +3461,9 @@ function initAudioContext(){
       // Ensure analyser output is connected exactly once.
       try{ analyser.disconnect(); }catch(e){}
       try{ analyser.connect(audioContext.destination); }catch(e){}
+
+      // Wire iOS audio-session state change handler.
+      try{ _wireAudioCtxStateChange(audioContext); }catch(e){}
 
       // If loop playback already started before analyser existed,
       // re-route it through analyser so beat pulse works on first play.
