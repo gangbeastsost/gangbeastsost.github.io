@@ -495,6 +495,15 @@
     "duration": 112.2
   },
   {
+    "title": "Totems",
+    "stage": "Totems",
+    "side": "A",
+    "artist": "dotpy",
+    "file": "music/Totems.mp3",
+    "image": "images/Totems.png",
+    "duration": 93.5
+  },
+  {
     "title": "Pause",
     "stage": "Pause",
     "side": "A",

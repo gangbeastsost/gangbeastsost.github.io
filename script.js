@@ -430,6 +430,8 @@ const CUSTOM_EXCLUSIONS_NAME_KEY = 'gb:customExclusionsName';
 const CUSTOM_FILTERS_KEY = 'gb:customFilters';
 const CUSTOM_FILTERS_ACTIVE_KEY = 'gb:customFiltersActive';
 let _historyRecordedForIndex = -1; // dedup: only record once per play() call per track
+let _loopHistoryLastTime = null;
+let _loopHistoryLastIndex = -1;
 
 const OFFICIAL_ARTIST = 'doseone & Bob Larder';
 
@@ -2083,6 +2085,8 @@ function hideContextMenu(){
 function loadTrack(i, opts={fade:'cross'}){
   index = i;
   _historyRecordedForIndex = -1; // reset so next play() records this track fresh
+  _loopHistoryLastTime = null;
+  _loopHistoryLastIndex = i;
   try{ updateTrackActiveState(); }catch(e){}
   const t = tracks[i];
   // stop any WebAudio playback when loading a new track to avoid overlap
@@ -2328,6 +2332,22 @@ function startProgress(){
     const dur = (webPlaying && webSource && webSource.buffer) ? webSource.buffer.duration : audio.duration;
     if(dur && isFinite(dur)){
       const cur = getSmoothCurrentTime();
+      try{
+        if(loopMode === 'one' && isPlaying && !_audioSeeking && tracks[index]){
+          if(_loopHistoryLastIndex !== index || _loopHistoryLastTime === null){
+            _loopHistoryLastIndex = index;
+            _loopHistoryLastTime = cur;
+          }else{
+            const prev = _loopHistoryLastTime;
+            const wrapped = prev > (dur * 0.85) && cur < (dur * 0.2) && (prev - cur) > Math.max(0.5, dur * 0.35);
+            if(wrapped) recordHistoryEntry(tracks[index]);
+            _loopHistoryLastTime = cur;
+          }
+        }else{
+          _loopHistoryLastTime = cur;
+          _loopHistoryLastIndex = index;
+        }
+      }catch(e){}
       const p = (cur/dur)*100;
       if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
       setSeekPercent(p);
@@ -2342,7 +2362,13 @@ function startProgress(){
   progressRaf = requestAnimationFrame(step);
 }
 
-function stopProgress(){ if(progressRaf){ cancelAnimationFrame(progressRaf); progressRaf = null; } try{ updateTrackActiveState(); }catch(e){} try{ stopBeatPulse(); }catch(e){} }
+function stopProgress(){
+  if(progressRaf){ cancelAnimationFrame(progressRaf); progressRaf = null; }
+  _loopHistoryLastTime = null;
+  _loopHistoryLastIndex = -1;
+  try{ updateTrackActiveState(); }catch(e){}
+  try{ stopBeatPulse(); }catch(e){}
+}
 
 // modal controls only (main player removed)
 mPlay.addEventListener('click',()=>{isPlaying?pause():play();});
@@ -3356,8 +3382,20 @@ function initAudioContext(){
       if(!audioSource){
         audioSource = audioContext.createMediaElementSource(audio);
         audioSource.connect(analyser);
-        analyser.connect(audioContext.destination);
       }
+
+      // Ensure analyser output is connected exactly once.
+      try{ analyser.disconnect(); }catch(e){}
+      try{ analyser.connect(audioContext.destination); }catch(e){}
+
+      // If loop playback already started before analyser existed,
+      // re-route it through analyser so beat pulse works on first play.
+      try{
+        if(webPlaying && webGain && analyser){
+          try{ webGain.disconnect(); }catch(e){}
+          webGain.connect(analyser);
+        }
+      }catch(e){}
     }catch(e){
       console.warn('Web Audio API not supported', e);
     }
