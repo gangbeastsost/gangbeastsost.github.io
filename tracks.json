@@ -432,16 +432,16 @@
     "duration": 185.9
   },
   {
-    "title": "Floating Ship Symphony",
+    "title": "Floating Ship Symphony (Original)",
     "stage": "Airship",
-    "side": "Full",
+    "side": "Original",
     "artist": "Suno AI",
-    "file": "music/Floating Ship Symphony.mp3",
+    "file": "music/Floating Ship Symphony (Original Version).mp3",
     "image": "images/Airship.png",
     "duration": 212.9
   },
   {
-    "title": "Floating Ship Symphony (Game Version)",
+    "title": "Floating Ship Symphony (Game)",
     "stage": "Airship",
     "side": "Game",
     "artist": "Minimack Studios & Suno AI",

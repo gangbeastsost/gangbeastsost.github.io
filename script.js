@@ -80,6 +80,9 @@ const trackContextMenu = document.getElementById('trackContextMenu');
 const ostDurationEl = document.getElementById('ostDurationEl');
 const mTrackCounter = document.getElementById('mTrackCounter');
 const miniTrackCounter = document.getElementById('miniTrackCounter');
+const mVersionSwitcher = document.getElementById('mVersionSwitcher');
+const mVersionPrev = document.getElementById('mVersionPrev');
+const mVersionNext = document.getElementById('mVersionNext');
 let contextMenuTrackIndex = -1;
 
 // Media Session (lock screen / OS media controls)
@@ -309,6 +312,153 @@ function findTrackIndexBySongParam(songParam){
   }catch(e){ return -1; }
 }
 
+const FLOATING_SHIP_STAGE = 'Airship';
+const FLOATING_SHIP_SIDE_ORIGINAL = 'Original';
+const FLOATING_SHIP_SIDE_GAME = 'Game';
+const FLOATING_SHIP_SIDE_KEY = 'gb:floatingShipSide';
+
+function _normalizeFloatingSide(side){
+  try{
+    const raw = String(side || '').trim().toLowerCase();
+    if(raw === 'game') return FLOATING_SHIP_SIDE_GAME;
+    return FLOATING_SHIP_SIDE_ORIGINAL;
+  }catch(e){ return FLOATING_SHIP_SIDE_ORIGINAL; }
+}
+
+function _isFloatingShipVariantTrack(t){
+  try{
+    if(!t) return false;
+    const stage = String(t.stage || '').trim();
+    if(stage !== FLOATING_SHIP_STAGE) return false;
+    const side = _normalizeFloatingSide(t.side);
+    return side === FLOATING_SHIP_SIDE_ORIGINAL || side === FLOATING_SHIP_SIDE_GAME;
+  }catch(e){ return false; }
+}
+
+function _isFloatingShipOriginalTrack(t){
+  try{ return _isFloatingShipVariantTrack(t) && _normalizeFloatingSide(t.side) === FLOATING_SHIP_SIDE_ORIGINAL; }catch(e){ return false; }
+}
+
+function _isFloatingShipGameTrack(t){
+  try{ return _isFloatingShipVariantTrack(t) && _normalizeFloatingSide(t.side) === FLOATING_SHIP_SIDE_GAME; }catch(e){ return false; }
+}
+
+function _getDisplayTitle(t){
+  try{
+    if(!t) return '';
+    return String(t.title || '');
+  }catch(e){ return String((t && t.title) || ''); }
+}
+
+function _findFloatingShipTrackIndexBySide(side){
+  try{
+    const target = _normalizeFloatingSide(side);
+    for(let i=0;i<tracks.length;i++){
+      const t = tracks[i];
+      if(!_isFloatingShipVariantTrack(t)) continue;
+      if(_normalizeFloatingSide(t.side) === target) return i;
+    }
+    return -1;
+  }catch(e){ return -1; }
+}
+
+function _setFloatingShipPreferredSide(side, persist=true){
+  try{
+    floatingShipPreferredSide = _normalizeFloatingSide(side);
+    if(persist){
+      try{ localStorage.setItem(FLOATING_SHIP_SIDE_KEY, floatingShipPreferredSide); }catch(e){}
+    }
+  }catch(e){}
+}
+
+function _getRepresentativeTrackIndex(trackIndex){
+  try{
+    const i = parseInt(trackIndex, 10);
+    if(!Number.isFinite(i) || i < 0 || i >= tracks.length) return 0;
+    const t = tracks[i];
+    if(_isFloatingShipGameTrack(t)){
+      const originalIdx = _findFloatingShipTrackIndexBySide(FLOATING_SHIP_SIDE_ORIGINAL);
+      if(originalIdx >= 0) return originalIdx;
+    }
+    return i;
+  }catch(e){ return 0; }
+}
+
+function _resolveTrackIndexForPlayback(trackIndex, opts={}){
+  try{
+    const i = parseInt(trackIndex, 10);
+    if(!Number.isFinite(i) || i < 0 || i >= tracks.length) return 0;
+    const respectPreference = !(opts && opts.respectFloatingPreference === false);
+    if(!respectPreference) return i;
+    const t = tracks[i];
+    if(_isFloatingShipOriginalTrack(t)){
+      const preferredIdx = _findFloatingShipTrackIndexBySide(floatingShipPreferredSide);
+      if(preferredIdx >= 0) return preferredIdx;
+    }
+    return i;
+  }catch(e){ return 0; }
+}
+
+function _isTrackListedInCards(t){
+  try{
+    if(!t) return false;
+    if(_isFloatingShipGameTrack(t)) return false;
+    return true;
+  }catch(e){ return true; }
+}
+
+function getListedTrackIndices(){
+  try{
+    const out = [];
+    for(let i=0;i<tracks.length;i++){
+      const t = tracks[i];
+      if(!isTrackAllowedByViewFilter(t)) continue;
+      if(!_isTrackListedInCards(t)) continue;
+      out.push(i);
+    }
+    return out;
+  }catch(e){ return []; }
+}
+
+function _updateFloatingShipVersionUI(trackIndex){
+  try{
+    if(!mVersionSwitcher) return;
+    const t = tracks[trackIndex];
+    const show = !!_isFloatingShipVariantTrack(t);
+    mVersionSwitcher.style.display = show ? '' : 'none';
+    if(show){
+      const side = _normalizeFloatingSide(t.side);
+      if(mVersionPrev) mVersionPrev.disabled = (side === FLOATING_SHIP_SIDE_ORIGINAL);
+      if(mVersionNext) mVersionNext.disabled = (side === FLOATING_SHIP_SIDE_GAME);
+    }
+  }catch(e){}
+}
+
+function _applyFloatingShipVersion(nextSide){
+  try{
+    const normalized = _normalizeFloatingSide(nextSide);
+    _setFloatingShipPreferredSide(normalized, true);
+    const target = _findFloatingShipTrackIndexBySide(normalized);
+    if(target < 0){
+      try{ renderList(); }catch(e){}
+      try{ updateTrackCounter(); }catch(e){}
+      try{ _updateFloatingShipVersionUI(index); }catch(e){}
+      return;
+    }
+    const isCurrentFloating = _isFloatingShipVariantTrack(tracks[index]);
+    const wasPlaying = !!isPlaying;
+    if(isCurrentFloating && index !== target){
+      const fadeMode = (modal && !modal.classList.contains('hidden')) ? 'cross' : 'in';
+      loadTrack(target, {fade:fadeMode, respectFloatingPreference:false});
+      if(wasPlaying) play();
+    }
+    try{ renderList(); }catch(e){}
+    try{ updateTrackCounter(); }catch(e){}
+    try{ updateTrackActiveState(); }catch(e){}
+    try{ _updateFloatingShipVersionUI(index); }catch(e){}
+  }catch(e){}
+}
+
 let _preloadToastTimer = null;
 
 function showPreloadToast(msg){
@@ -357,7 +507,7 @@ function updateMediaSessionMetadata(t){
     }
     const art = t.image ? _absUrl(encodeURI(t.image)) : undefined;
     const data = {
-      title: t.title || '',
+      title: _getDisplayTitle(t),
       artist: t.artist || '',
       album: 'Gang Beasts OST',
       artwork: art ? [
@@ -491,6 +641,7 @@ let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
 let searchQuery = '';
+let floatingShipPreferredSide = FLOATING_SHIP_SIDE_ORIGINAL;
 
 let recentlyPlayed = []; // Array of track indices (max 20)
 const MAX_RECENT = 20;
@@ -845,24 +996,20 @@ function toggleSettingsModal(force){
 
 function getPlayableIndices(){
   try{
-    const out = [];
-    for(let i=0;i<tracks.length;i++){
-      if(isTrackAllowedByViewFilter(tracks[i])) out.push(i);
-    }
-    return out;
+    return getListedTrackIndices();
   }catch(e){ return []; }
 }
 
 function findNextAllowedIndex(fromIndex, dir){
   try{
-    const n = tracks.length;
-    if(!n) return 0;
-    const start = (typeof fromIndex === 'number' ? fromIndex : 0);
-    for(let step=1; step<=n; step++){
-      const cand = (start + (dir * step) + n) % n;
-      if(isTrackAllowedByViewFilter(tracks[cand])) return cand;
-    }
-    return start;
+    const playable = getPlayableIndices();
+    if(!playable.length) return 0;
+    const stepDir = dir >= 0 ? 1 : -1;
+    const rep = _getRepresentativeTrackIndex((typeof fromIndex === 'number') ? fromIndex : playable[0]);
+    let pos = playable.indexOf(rep);
+    if(pos < 0) pos = 0;
+    const nextPos = (pos + stepDir + playable.length) % playable.length;
+    return playable[nextPos];
   }catch(e){ return (fromIndex + dir + tracks.length) % tracks.length; }
 }
 
@@ -1232,7 +1379,7 @@ function setPreloading(active){
             try{
               if(hasSrc){
                 const t = tracks[index];
-                if(t && trackTitle) trackTitle.textContent = t.title;
+                if(t && trackTitle) trackTitle.textContent = _getDisplayTitle(t);
               }
             }catch(e){}
             // Re-enable mini controls only if an audio source is present (a track is loaded)
@@ -1259,6 +1406,12 @@ async function init(){
   try{ setupIOSPauseOnBackground(); }catch(e){}
   const resp = await fetch('tracks.json');
   tracks = await resp.json();
+
+  // restore preferred Floating Ship Symphony version
+  try{
+    const savedSide = localStorage.getItem(FLOATING_SHIP_SIDE_KEY);
+    _setFloatingShipPreferredSide(savedSide || FLOATING_SHIP_SIDE_ORIGINAL, false);
+  }catch(e){}
 
   // Seed trackDurations from any pre-baked `duration` fields in tracks.json
   try{
@@ -1367,6 +1520,7 @@ async function init(){
       _setCopyButtonState(miniCopyLink, null);
       _setCopyButtonState(mCopyLink, null);
     }catch(e){}
+    try{ _updateFloatingShipVersionUI(-1); }catch(e){}
   }catch(e){}
 
   // If a deep link is present, load that track (but don't autoplay).
@@ -1375,7 +1529,7 @@ async function init(){
     const songParam = url.searchParams.get('song');
     const idx = findTrackIndexBySongParam(songParam);
     if(idx >= 0){
-      loadTrack(idx, {fade:'in'});
+      loadTrack(idx, {fade:'in', respectFloatingPreference:false});
     }
   }catch(e){}
 
@@ -1704,6 +1858,19 @@ async function init(){
         }catch(e){}
       });
     }
+
+    if(mVersionPrev){
+      mVersionPrev.addEventListener('click', (ev)=>{
+        try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+        _applyFloatingShipVersion(FLOATING_SHIP_SIDE_ORIGINAL);
+      });
+    }
+    if(mVersionNext){
+      mVersionNext.addEventListener('click', (ev)=>{
+        try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+        _applyFloatingShipVersion(FLOATING_SHIP_SIDE_GAME);
+      });
+    }
     
     // Close keyboard hint on click
     if(keyboardHint){
@@ -1739,15 +1906,16 @@ async function init(){
         if(trackIndex < 0 || trackIndex >= tracks.length) return;
         
         try{
+          const resolvedIndex = _resolveTrackIndexForPlayback(trackIndex);
           if(action === 'play'){
-            loadTrack(trackIndex, {fade:'in'});
+            loadTrack(resolvedIndex, {fade:'in'});
             play();
           } else if(action === 'copyLink'){
-            const t = tracks[trackIndex];
+            const t = tracks[resolvedIndex];
             const url = getSongShareUrlForTrack(t);
             copyTextToClipboard(url);
           } else if(action === 'download'){
-            const t = tracks[trackIndex];
+            const t = tracks[resolvedIndex];
             const a = document.createElement('a');
             a.href = encodeURI(t.file);
             a.download = `${t.title}.mp3`;
@@ -1865,13 +2033,21 @@ function fmtTotal(s){
 function updateOSTDuration(){
   try{
     if(!ostDurationEl||!tracks||!tracks.length) return;
-    // Apply same view filter + search behavior source as renderList
-    const filtered=tracks.filter((t)=>isTrackAllowedByViewFilter(t));
-    const known=filtered.filter(t=>typeof t.duration==='number'&&t.duration>0);
+    const listedIndices = getListedTrackIndices();
+    const listedTracks = listedIndices.map((i)=>{
+      const base = tracks[i];
+      if(!base) return null;
+      if(_isFloatingShipOriginalTrack(base)){
+        const prefIndex = _findFloatingShipTrackIndexBySide(floatingShipPreferredSide);
+        if(prefIndex >= 0 && tracks[prefIndex]) return tracks[prefIndex];
+      }
+      return base;
+    }).filter(Boolean);
+    const known=listedTracks.filter(t=>typeof t.duration==='number'&&t.duration>0);
     if(!known.length) return;
     const total=known.reduce((a,t)=>a+t.duration,0);
     if(total>0){
-      ostDurationEl.textContent=`${fmtTotal(total)} \u00b7 ${filtered.length} tracks`;
+      ostDurationEl.textContent=`${fmtTotal(total)} \u00b7 ${listedTracks.length} tracks`;
       ostDurationEl.style.opacity='0.75';
     }
   }catch(e){}
@@ -2002,7 +2178,16 @@ function clearListenHistory(){
 function updateTrackCounter(){
   try{
     if(!tracks||!tracks.length) return;
-    const text=`Track ${index+1} of ${tracks.length}`;
+    const listed = getListedTrackIndices();
+    if(!listed.length){
+      if(mTrackCounter) mTrackCounter.textContent='';
+      if(miniTrackCounter) miniTrackCounter.textContent='';
+      return;
+    }
+    const rep = _getRepresentativeTrackIndex(index);
+    let pos = listed.indexOf(rep);
+    if(pos < 0) pos = 0;
+    const text=`Track ${pos+1} of ${listed.length}`;
     if(mTrackCounter) mTrackCounter.textContent=text;
     if(miniTrackCounter) miniTrackCounter.textContent=text;
   }catch(e){}
@@ -2042,15 +2227,26 @@ function preloadAllDurations(){
 }
 function renderList(){
   trackListEl.innerHTML = '';
-  tracks.forEach((t,i)=>{
-    // apply current view filter
-    try{ if(!isTrackAllowedByViewFilter(t)) return; }catch(e){}
+  const listedIndices = getListedTrackIndices();
+  listedIndices.forEach((i)=>{
+    const baseTrack = tracks[i];
+    let displayIndex = i;
+    let displayTrack = baseTrack;
+    try{
+      if(_isFloatingShipOriginalTrack(baseTrack)){
+        const prefIndex = _findFloatingShipTrackIndexBySide(floatingShipPreferredSide);
+        if(prefIndex >= 0 && tracks[prefIndex]){
+          displayIndex = prefIndex;
+          displayTrack = tracks[prefIndex];
+        }
+      }
+    }catch(e){}
 
     // apply search filter (matches across title/artist/stage/side/file)
     try{
       const q = (searchQuery || '').trim().toLowerCase();
       if(q){
-        const hay = [t.title, t.artist, t.stage, t.side, t.file]
+        const hay = [displayTrack.title, displayTrack.artist, displayTrack.stage, displayTrack.side, displayTrack.file]
           .filter(Boolean)
           .map(v=>String(v).toLowerCase())
           .join(' ');
@@ -2060,8 +2256,8 @@ function renderList(){
 
     const el = document.createElement('button');
     el.className = 'track';
-    el.innerHTML = `<img src="${encodeURI(t.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${t.title}</span><span class="track-dur">${trackDurations[i]?fmt(trackDurations[i]):''}</span></div><div class="sub">${t.artist||''}</div></div>`;
-    if(trackDurations[i]){
+    el.innerHTML = `<img src="${encodeURI(displayTrack.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${_getDisplayTitle(displayTrack)}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="sub">${displayTrack.artist||''}</div></div>`;
+    if(trackDurations[displayIndex]){
       const durEl=el.querySelector('.track-dur');
       if(durEl) durEl.classList.add('loaded');
     }
@@ -2082,10 +2278,11 @@ function renderList(){
     // clicking the track loads/plays but DOES NOT open the modal
     el.addEventListener('click',()=>{
       try{
-        if(index === i && audio && audio.src){
+        const playIndex = _resolveTrackIndexForPlayback(i);
+        if(index === playIndex && audio && audio.src){
           if(!isPlaying) play();
         } else {
-          loadTrack(i,{fade:'in'});
+          loadTrack(playIndex,{fade:'in'});
           play();
         }
       }catch(e){}
@@ -2094,7 +2291,7 @@ function renderList(){
     try{
       const img = el.querySelector('img');
       if(img){
-        img.addEventListener('click',(ev)=>{ ev.stopPropagation(); try{ openModal(i); }catch(e){} });
+        img.addEventListener('click',(ev)=>{ ev.stopPropagation(); try{ openModal(_resolveTrackIndexForPlayback(i)); }catch(e){} });
       }
     }catch(e){}
     trackListEl.appendChild(el);
@@ -2107,10 +2304,11 @@ function updateTrackActiveState(){
   try{
     if(!trackListEl) return;
     const hasSong = !!(audio && audio.hasAttribute('src'));
+    const activeRep = hasSong ? _getRepresentativeTrackIndex(index) : -1;
     const els = trackListEl.querySelectorAll('.track');
     els.forEach(el=>{
       const ti = parseInt(el.dataset.trackIndex, 10);
-      if(hasSong && ti === index){
+      if(hasSong && ti === activeRep){
         el.classList.add('active');
         if(isPlaying) el.classList.add('playing');
         else el.classList.remove('playing');
@@ -2129,13 +2327,13 @@ function showContextMenu(x, y, trackIndex){
       return;
     }
     contextMenuTrackIndex = trackIndex;
-    
+
     // Position menu
     trackContextMenu.style.left = `${x}px`;
     trackContextMenu.style.top = `${y}px`;
     trackContextMenu.classList.remove('hidden');
     console.log('Context menu shown');
-    
+
     // Adjust position if menu goes off-screen
     setTimeout(()=>{
       const rect = trackContextMenu.getBoundingClientRect();
@@ -2159,12 +2357,14 @@ function hideContextMenu(){
 }
 
 function loadTrack(i, opts={fade:'cross'}){
-  index = i;
+  const resolvedIndex = _resolveTrackIndexForPlayback(i, opts);
+  index = resolvedIndex;
   _historyRecordedForIndex = -1; // reset so next play() records this track fresh
   _loopHistoryLastTime = null;
-  _loopHistoryLastIndex = i;
+  _loopHistoryLastIndex = index;
   try{ updateTrackActiveState(); }catch(e){}
-  const t = tracks[i];
+  const t = tracks[index];
+  try{ if(_isFloatingShipVariantTrack(t)) _setFloatingShipPreferredSide(t.side, true); }catch(e){}
   // stop any WebAudio playback when loading a new track to avoid overlap
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
   try{ audio.pause(); }catch(e){}
@@ -2173,12 +2373,13 @@ function loadTrack(i, opts={fade:'cross'}){
   try{ audio.currentTime = 0; }catch(e){}
   webOffset = 0; webOffsetValid = false;
   // do not pre-decode here to avoid blocking load; decoding happens when play is requested
-  trackTitle.textContent = t.title;
   trackTitle.classList.add('track-title-main');
   coverImg.src = encodeURI(t.image);
   if(trackArtist) trackArtist.textContent = t.artist || '';
   // update modal and mini UI with configurable fade
-  if(mTitle) mTitle.textContent = t.title;
+  const displayTitle = _getDisplayTitle(t);
+  trackTitle.textContent = displayTitle;
+  if(mTitle) mTitle.textContent = displayTitle;
   if(mArtist) mArtist.textContent = t.artist||'';
   const setImgFade = (el, src, dur=220)=>{
     if(!el) return;
@@ -2246,7 +2447,7 @@ function loadTrack(i, opts={fade:'cross'}){
     setImgFade(mCover, encodeURI(t.image));
     setImgFade(miniCover, encodeURI(t.image));
   }
-  if(miniTitle) miniTitle.textContent = t.title;
+  if(miniTitle) miniTitle.textContent = displayTitle;
   if(miniArtist) miniArtist.textContent = t.artist||'';
   try{ updateMediaSessionMetadata(t); }catch(e){}
   try{ updateMediaSessionPlaybackState(); }catch(e){}
@@ -2290,6 +2491,7 @@ function loadTrack(i, opts={fade:'cross'}){
   // Aggressively preload next and previous tracks immediately
   try{ preloadNextTrack(); }catch(e){}
   try{ updateTrackCounter(); }catch(e){}
+  try{ _updateFloatingShipVersionUI(index); }catch(e){}
 }
 
 
@@ -2645,7 +2847,7 @@ function skip(dir){
       }
     }catch(e){
       // if shuffle logic fails for any reason, fall back to sequential
-      index = (index + dir + tracks.length) % tracks.length;
+      index = findNextAllowedIndex(index, dir);
     }
   } else {
     index = findNextAllowedIndex(index, dir);
@@ -2653,7 +2855,8 @@ function skip(dir){
 
   // reset saved web offset when changing tracks
   webOffsetValid = false;
-  const targetFile = tracks[index] && tracks[index].file;
+  const targetPlaybackIndex = _resolveTrackIndexForPlayback(index);
+  const targetFile = tracks[targetPlaybackIndex] && tracks[targetPlaybackIndex].file;
   const isPreloaded = targetFile && bufferCache.has(targetFile);
   
   // Stop current WebAudio playback
@@ -2664,16 +2867,16 @@ function skip(dir){
     try{
       // Update all UI first via loadTrack
       if(!modal.classList.contains('hidden')){
-        loadTrack(index, {fade:'cross'});
+        loadTrack(targetPlaybackIndex, {fade:'cross'});
       } else {
-        loadTrack(index, {fade:'in'});
+        loadTrack(targetPlaybackIndex, {fade:'in'});
       }
       
       // Now immediately start playback
       const loopActive = loopMode === 'one';
       if(loopActive){
         // Use WebAudio for seamless loop
-        switchToWebLoop(targetFile, 0);
+        switchToWebLoop(tracks[index].file, 0);
         isPlaying = true;
         mPlay.textContent='❚❚';
         if(miniPlay) miniPlay.textContent='❚❚';
@@ -2705,9 +2908,9 @@ function skip(dir){
   
   // Standard load path when not preloaded
   if(!modal.classList.contains('hidden')){
-    loadTrack(index, {fade:'cross'});
+    loadTrack(targetPlaybackIndex, {fade:'cross'});
   } else {
-    loadTrack(index, {fade:'in'});
+    loadTrack(targetPlaybackIndex, {fade:'in'});
   }
   play();
 }
@@ -2783,6 +2986,7 @@ function clearPlaybackToNoSong(){
   try{ setSeekPercent(0); }catch(e){}
   try{ if(heroArt) heroArt.classList.remove('playing'); }catch(e){}
   try{ if(mTrackCounter) mTrackCounter.textContent=''; if(miniTrackCounter) miniTrackCounter.textContent=''; }catch(e){}
+  try{ _updateFloatingShipVersionUI(-1); }catch(e){}
   try{ updateTrackActiveState(); }catch(e){}
   try{ setSongQueryParam(null); }catch(e){}
   _clearingNoSong = false;
@@ -2975,11 +3179,13 @@ audio.addEventListener('ended',()=>{
     return;
   }
   try{
-    const atLast = (typeof tracks !== 'undefined' && tracks && (index === tracks.length - 1));
+    const playable = getPlayableIndices();
+    const repIndex = _getRepresentativeTrackIndex(index);
+    const atLast = !!(playable && playable.length && repIndex === playable[playable.length - 1]);
     if(atLast && !isShuffling){
       if(loopMode === 'all'){
         // wrap back to first track
-        index = 0;
+        index = playable[0];
         if(!modal.classList.contains('hidden')){
           loadTrack(index, {fade:'cross'});
         } else {

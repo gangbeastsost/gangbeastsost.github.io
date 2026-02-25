@@ -146,6 +146,24 @@ body::before{content:"";position:fixed;inset:-40px;background-image:url('images/
 .modal-art img{transition:opacity .32s ease}
 .modal-info{flex:1;color:var(--muted)}
 .m-title{font-weight:800;font-size:1.15rem;color:white;letter-spacing:-0.015em;text-shadow:0 10px 30px rgba(0,0,0,0.7),0 1px 0 rgba(0,0,0,0.5)}
+.m-version-switcher{display:flex;align-items:center;gap:2px;flex-shrink:0;margin-left:2px}
+.m-version-arrow{
+  width:26px;
+  height:26px;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,0.16);
+  background:rgba(255,255,255,0.08);
+  color:#fff;
+  font-size:0.72rem;
+  line-height:1;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  transition:background .18s ease,border-color .18s ease,opacity .18s ease;
+}
+.m-version-arrow:hover{background:rgba(255,255,255,0.14);border-color:rgba(255,255,255,0.26)}
+.m-version-arrow:disabled{opacity:.45;cursor:not-allowed}
 .track-title-main{color:white}
 .track .meta .title{color:white}
 .m-artist{margin-top:6px;color:var(--muted)}
