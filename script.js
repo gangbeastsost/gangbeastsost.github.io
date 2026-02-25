@@ -142,7 +142,7 @@ function _iosRestoreWebLoop(){
     if(!file || !bufferCache.has(file)) return;
     const pos = audio.currentTime || 0;
     const started = switchToWebLoop(file, pos);
-    if(started){ audio.muted = true; audio.loop = true; }
+    if(started){ audio.loop = true; } // audio.muted stays false — switchToWebLoop handles AudioSource gain
   }catch(e){}
 }
 
@@ -408,6 +408,8 @@ function _seekToSeconds(targetSeconds){
     if(loopActive && buf){
       if(isPlaying){
         switchToWebLoop(file, (clamped % dur));
+        // Sync audio.currentTime to the seek target so iOS scrubbing doesn't snap back.
+        try{ if(audio) audio.currentTime = clamped % dur; }catch(e){}
       } else {
         webOffset = clamped;
         webOffsetValid = true;
@@ -1019,7 +1021,8 @@ function stopWebLoop(){
   webPlaying = false;
   webFile = null;
   webOffsetValid = false;
-  // If we were using <audio> as a muted media-session anchor, restore it.
+  // Restore the audio element's WebAudio gain so non-loop playback is audible again.
+  try{ if(audioSourceGain) audioSourceGain.gain.setValueAtTime(1, audioCtx ? audioCtx.currentTime : 0); }catch(e){}
   try{ if(audio){ audio.muted = false; audio.loop = false; } }catch(e){}
 }
 function getWebCurrentTime(){
@@ -1111,16 +1114,11 @@ function switchToWebLoop(file, offset=0){
   try{
     if(!file) return false;
     
-    // Use the waveform's audioContext if it exists, otherwise create one
-    if(audioContext && !audioCtx){
-      audioCtx = audioContext;
-    } else if(!audioCtx && audioContext){
-      audioCtx = audioContext;
-    } else if(!audioCtx){
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    
-    // Wire iOS state-change handler on first use.
+    // Ensure AudioContext, analyser, createMediaElementSource and audioSourceGain
+    // are all initialised before we start the loop. This is required so we can
+    // silence the audio element's WebAudio output via audioSourceGain instead of
+    // audio.muted (iOS needs muted=false to show the lock-screen/control-center).
+    try{ initAudioContext(); }catch(e){}
     try{ _wireAudioCtxStateChange(audioCtx); }catch(e){}
     try{ if(audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') audioCtx.resume(); }catch(e){}
     const buf = bufferCache.get(file);
@@ -1158,12 +1156,16 @@ function switchToWebLoop(file, offset=0){
       // no fade-in when starting from idle — set target volume at start time
       gain.gain.setValueAtTime(targetVol, startTime);
     }
-    // Keep <audio> as a muted anchor while WebAudio is active (helps iPadOS show lock-screen metadata).
-    try{ if(audio){ audio.muted = true; audio.loop = true; } }catch(e){}
+    // Silence the audio element's WebAudio contribution to avoid double-audio,
+    // but keep audio.muted = false so iOS shows the lock-screen / control-center widget.
+    try{ if(audioSourceGain) audioSourceGain.gain.setValueAtTime(0, audioCtx.currentTime); }catch(e){}
+    try{ if(audio){ audio.muted = false; audio.loop = true; } }catch(e){}
     // start at offset at the scheduled time; let it loop indefinitely
     src.start(startTime, offset % buf.duration);
-    // Ensure the media element is actually playing (muted) so iPadOS has an active media session.
-    try{ if(audio && audio.src){ audio.play().catch(()=>{}); } }catch(e){}
+    // Keep <audio> playing and sync its currentTime to the WebAudio offset.
+    // iOS uses audio.currentTime to validate scrub positions; if they diverge
+    // the lock-screen timeline snaps back when the user releases the scrubber.
+    try{ if(audio && audio.src){ audio.currentTime = offset % buf.duration; audio.play().catch(()=>{}); } }catch(e){}
     // stop any previous web source
     try{ if(webSource){ try{ webSource.stop(); }catch(e){} try{ webSource.disconnect(); }catch(e){} } }catch(e){}
     webSource = src;
@@ -3309,6 +3311,7 @@ let visualizationMode = 'spectrum'; // 'spectrum' or 'waveform'
 let audioContext = null;
 let analyser = null;
 let audioSource = null;
+let audioSourceGain = null; // zero-gain node for audioSource; lets us silence the element's WebAudio path without audio.muted=true
 let waveformAnimationId = null;
 let waveformColors = ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
 let spectrumParticles = [];
@@ -3452,10 +3455,16 @@ function initAudioContext(){
       analyser.fftSize = 4096;
       analyser.smoothingTimeConstant = 0.85;
       
-      // Connect audio element to analyser
+      // Connect audio element to analyser via a controllable gain node.
+      // audioSourceGain lets us silence the element's WebAudio contribution
+      // (value=0 when BufferSource loop is active) without ever setting
+      // audio.muted=true, which would break the iOS lock-screen widget.
       if(!audioSource){
         audioSource = audioContext.createMediaElementSource(audio);
-        audioSource.connect(analyser);
+        audioSourceGain = audioContext.createGain();
+        audioSourceGain.gain.value = webPlaying ? 0 : 1;
+        audioSource.connect(audioSourceGain);
+        audioSourceGain.connect(analyser);
       }
 
       // Ensure analyser output is connected exactly once.
