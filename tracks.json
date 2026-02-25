@@ -5,7 +5,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Days.mp3",
-    "image": "images/Gang Beasts Days.png"
+    "image": "images/Gang Beasts Days.png",
+    "duration": 150.5
   },
   {
     "title": "Gang Beasts Nights",
@@ -13,7 +14,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Nights.mp3",
-    "image": "images/Gang Beasts Nights.png"
+    "image": "images/Gang Beasts Nights.png",
+    "duration": 164.6
   },
   {
     "title": "Aquarium Splash (UNOFFICIAL NAME)",
@@ -21,7 +23,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Aquarium Splash.mp3",
-    "image": "images/Aquarium.png"
+    "image": "images/Aquarium.png",
+    "duration": 224
   },
   {
     "title": "Aquarium Fling (UNOFFICIAL NAME)",
@@ -29,7 +32,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Aquarium Fling.mp3",
-    "image": "images/Aquarium.png"
+    "image": "images/Aquarium.png",
+    "duration": 224
   },
   {
     "title": "Beef City",
@@ -37,7 +41,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Beef City.mp3",
-    "image": "images/Alley.png"
+    "image": "images/Alley.png",
+    "duration": 201.9
   },
   {
     "title": "Beef City Hustle",
@@ -45,7 +50,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Beef City Hustle.mp3",
-    "image": "images/Alley.png"
+    "image": "images/Alley.png",
+    "duration": 201.9
   },
   {
     "title": "Billboard Bash",
@@ -53,7 +59,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Billboard Bash.mp3",
-    "image": "images/Billboard.png"
+    "image": "images/Billboard.png",
+    "duration": 207
   },
   {
     "title": "Billboard Banger",
@@ -61,7 +68,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Billboard Banger.mp3",
-    "image": "images/Billboard.png"
+    "image": "images/Billboard.png",
+    "duration": 207
   },
   {
     "title": "Blimp Drift",
@@ -69,7 +77,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Blimp Drift.mp3",
-    "image": "images/Blimp.png"
+    "image": "images/Blimp.png",
+    "duration": 159.5
   },
   {
     "title": "Blimp Flip",
@@ -77,7 +86,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Blimp Flip.mp3",
-    "image": "images/Blimp.png"
+    "image": "images/Blimp.png",
+    "duration": 159.5
   },
   {
     "title": "Buoy Beautiful",
@@ -85,7 +95,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Buoy Beautiful.mp3",
-    "image": "images/Buoy.png"
+    "image": "images/Buoy.png",
+    "duration": 160
   },
   {
     "title": "Buoy Bounce",
@@ -93,7 +104,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Buoy Bounce.mp3",
-    "image": "images/Buoy.png"
+    "image": "images/Buoy.png",
+    "duration": 160.1
   },
   {
     "title": "Chutes Ahoy",
@@ -101,7 +113,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Chutes Ahoy.mp3",
-    "image": "images/Chutes.png"
+    "image": "images/Chutes.png",
+    "duration": 181.9
   },
   {
     "title": "Chutes Loose",
@@ -109,7 +122,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Chutes Loose.mp3",
-    "image": "images/Chutes.png"
+    "image": "images/Chutes.png",
+    "duration": 181.9
   },
   {
     "title": "Containers Bang",
@@ -117,7 +131,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Containers Bang.mp3",
-    "image": "images/Containers.png"
+    "image": "images/Containers.png",
+    "duration": 167
   },
   {
     "title": "Containers of Joy",
@@ -125,7 +140,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Containers of Joy.mp3",
-    "image": "images/Containers.png"
+    "image": "images/Containers.png",
+    "duration": 171.3
   },
   {
     "title": "Crane Swing (UNOFFICIAL NAME)",
@@ -133,7 +149,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Crane Swing.mp3",
-    "image": "images/Crane.png"
+    "image": "images/Crane.png",
+    "duration": 132.4
   },
   {
     "title": "Crane Chaos (UNOFFICIAL NAME)",
@@ -141,7 +158,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Crane Chaos.mp3",
-    "image": "images/Crane.png"
+    "image": "images/Crane.png",
+    "duration": 132.4
   },
   {
     "title": "Elevators Impossible",
@@ -149,7 +167,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Elevators Impossible.mp3",
-    "image": "images/Elevators.png"
+    "image": "images/Elevators.png",
+    "duration": 158.9
   },
   {
     "title": "Elevators Action",
@@ -157,7 +176,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Elevators Action.mp3",
-    "image": "images/Elevators.png"
+    "image": "images/Elevators.png",
+    "duration": 158.9
   },
   {
     "title": "Girders Edge",
@@ -165,7 +185,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Girders Edge.mp3",
-    "image": "images/Girders.png"
+    "image": "images/Girders.png",
+    "duration": 172.7
   },
   {
     "title": "Girders Wild",
@@ -173,7 +194,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Girders Wild.mp3",
-    "image": "images/Girders.png"
+    "image": "images/Girders.png",
+    "duration": 172.6
   },
   {
     "title": "Gondola Getdown",
@@ -181,7 +203,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Gondola Getdown.mp3",
-    "image": "images/Gondola.png"
+    "image": "images/Gondola.png",
+    "duration": 156.8
   },
   {
     "title": "Gondola Dive",
@@ -189,7 +212,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Gondola Dive.mp3",
-    "image": "images/Gondola.png"
+    "image": "images/Gondola.png",
+    "duration": 156.8
   },
   {
     "title": "Grind On",
@@ -197,7 +221,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Grind On.mp3",
-    "image": "images/Grind.png"
+    "image": "images/Grind.png",
+    "duration": 156.3
   },
   {
     "title": "Grind Grind Grind",
@@ -205,7 +230,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Grind Grind Grind.mp3",
-    "image": "images/Grind.png"
+    "image": "images/Grind.png",
+    "duration": 156.3
   },
   {
     "title": "Incinerator Sonata",
@@ -213,7 +239,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Incinerator Sonata.mp3",
-    "image": "images/Incinerator.png"
+    "image": "images/Incinerator.png",
+    "duration": 192
   },
   {
     "title": "Incinerator Suite",
@@ -221,7 +248,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Incinerator Suite.mp3",
-    "image": "images/Incinerator.png"
+    "image": "images/Incinerator.png",
+    "duration": 192
   },
   {
     "title": "Lighthouse Lovely",
@@ -229,7 +257,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Lighthouse Lovely.mp3",
-    "image": "images/Lighthouse.png"
+    "image": "images/Lighthouse.png",
+    "duration": 195.9
   },
   {
     "title": "Lighthouse Leap",
@@ -237,7 +266,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Lighthouse Leap.mp3",
-    "image": "images/Lighthouse.png"
+    "image": "images/Lighthouse.png",
+    "duration": 195.9
   },
   {
     "title": "Ring Rumble",
@@ -245,7 +275,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Ring Rumble.mp3",
-    "image": "images/Ring.png"
+    "image": "images/Ring.png",
+    "duration": 162.5
   },
   {
     "title": "Ring Rocker",
@@ -253,7 +284,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Ring Rocker.mp3",
-    "image": "images/Ring.png"
+    "image": "images/Ring.png",
+    "duration": 162.5
   },
   {
     "title": "Rooftop Viewtiful",
@@ -261,7 +293,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Rooftop Viewtiful.mp3",
-    "image": "images/Roof.png"
+    "image": "images/Roof.png",
+    "duration": 202.6
   },
   {
     "title": "Rooftop Romp",
@@ -269,7 +302,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Rooftop Romp.mp3",
-    "image": "images/Roof.png"
+    "image": "images/Roof.png",
+    "duration": 202.5
   },
   {
     "title": "Subway Sly",
@@ -277,7 +311,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Subway Sly.mp3",
-    "image": "images/Subway.png"
+    "image": "images/Subway.png",
+    "duration": 165.6
   },
   {
     "title": "Subway Air",
@@ -285,7 +320,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Subway Air.mp3",
-    "image": "images/Subway.png"
+    "image": "images/Subway.png",
+    "duration": 165.6
   },
   {
     "title": "Cooling Dawn",
@@ -293,7 +329,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Cooling Dawn.mp3",
-    "image": "images/Towers.png"
+    "image": "images/Towers.png",
+    "duration": 165.5
   },
   {
     "title": "Cooling Out",
@@ -301,7 +338,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Cooling Out.mp3",
-    "image": "images/Towers.png"
+    "image": "images/Towers.png",
+    "duration": 165.5
   },
   {
     "title": "Train Rush (UNOFFICIAL NAME)",
@@ -309,7 +347,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Train Rush.mp3",
-    "image": "images/Train.png"
+    "image": "images/Train.png",
+    "duration": 160
   },
   {
     "title": "Train Freight (UNOFFICIAL NAME)",
@@ -317,7 +356,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Train Freight.mp3",
-    "image": "images/Train.png"
+    "image": "images/Train.png",
+    "duration": 160.8
   },
   {
     "title": "Trawler Brawler (UNOFFICIAL NAME)",
@@ -325,7 +365,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Trawler Brawler.mp3",
-    "image": "images/Trawler.png"
+    "image": "images/Trawler.png",
+    "duration": 255
   },
   {
     "title": "Trawler Haul (UNOFFICIAL NAME)",
@@ -333,7 +374,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Trawler Haul.mp3",
-    "image": "images/Trawler.png"
+    "image": "images/Trawler.png",
+    "duration": 255
   },
   {
     "title": "Trucks Thump",
@@ -341,7 +383,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Trucks Thump.mp3",
-    "image": "images/Trucks.png"
+    "image": "images/Trucks.png",
+    "duration": 144.6
   },
   {
     "title": "Trucks Twang",
@@ -349,7 +392,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Trucks Twang.mp3",
-    "image": "images/Trucks.png"
+    "image": "images/Trucks.png",
+    "duration": 144.6
   },
   {
     "title": "Fans Forever",
@@ -357,7 +401,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Fans Forever.mp3",
-    "image": "images/Vents.png"
+    "image": "images/Vents.png",
+    "duration": 179.3
   },
   {
     "title": "Fans Glam",
@@ -365,7 +410,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Fans Glam.mp3",
-    "image": "images/Vents.png"
+    "image": "images/Vents.png",
+    "duration": 179.3
   },
   {
     "title": "Wheel Real",
@@ -373,7 +419,8 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Wheel Real.mp3",
-    "image": "images/Wheel.png"
+    "image": "images/Wheel.png",
+    "duration": 185.9
   },
   {
     "title": "Wheel II Electric Boogaloo",
@@ -381,7 +428,8 @@
     "side": "B",
     "artist": "doseone & Bob Larder",
     "file": "music/Wheel II Electric Boogaloo.mp3",
-    "image": "images/Wheel.png"
+    "image": "images/Wheel.png",
+    "duration": 185.9
   },
   {
     "title": "Floating Ship Symphony",
@@ -389,7 +437,8 @@
     "side": "Full",
     "artist": "Suno AI",
     "file": "music/Floating Ship Symphony.mp3",
-    "image": "images/Airship.png"
+    "image": "images/Airship.png",
+    "duration": 212.9
   },
   {
     "title": "Floating Ship Symphony (Game Version)",
@@ -397,7 +446,8 @@
     "side": "Game",
     "artist": "Minimack Studios & Suno AI",
     "file": "music/Floating Ship Symphony (Game Version).mp3",
-    "image": "images/Airship.png"
+    "image": "images/Airship.png",
+    "duration": 141.2
   },
   {
     "title": "Airport (Sunshine Airport from Mario Kart 8)",
@@ -405,7 +455,8 @@
     "side": "A",
     "artist": "Mario Kart Band",
     "file": "music/Airport.mp3",
-    "image": "images/Airport.png"
+    "image": "images/Airport.png",
+    "duration": 111.3
   },
   {
     "title": "LoafBread",
@@ -413,7 +464,8 @@
     "side": "A",
     "artist": "RAFA120HOJAZ",
     "file": "music/LoafBread.mp3",
-    "image": "images/LoafBread.png"
+    "image": "images/LoafBread.png",
+    "duration": 112.1
   },
   {
     "title": "Donuts (SMB3 Athletic Theme Remix)",
@@ -421,7 +473,8 @@
     "side": "A",
     "artist": "Paulygon",
     "file": "music/Donuts.mp3",
-    "image": "images/Donuts.png"
+    "image": "images/Donuts.png",
+    "duration": 60
   },
   {
     "title": "MetalPipe (Metal Mario Theme from SM64)",
@@ -429,7 +482,8 @@
     "side": "A",
     "artist": "Koji Kondo",
     "file": "music/MetalPipe.mp3",
-    "image": "images/MetalPipe.png"
+    "image": "images/MetalPipe.png",
+    "duration": 96.8
   },
   {
     "title": "Tutorial",
@@ -437,7 +491,8 @@
     "side": "A",
     "artist": "Bob Larder",
     "file": "music/Tutorial.mp3",
-    "image": "images/Tutorial.png"
+    "image": "images/Tutorial.png",
+    "duration": 112.2
   },
   {
     "title": "Pause",
@@ -445,6 +500,7 @@
     "side": "A",
     "artist": "doseone & Bob Larder",
     "file": "music/Pause.mp3",
-    "image": "images/Pause.png"
+    "image": "images/Pause.png",
+    "duration": 120
   }
 ]

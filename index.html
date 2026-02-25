@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=0.9" />
   <title>Gang Beasts OST Player</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
       <meta property="og:title" content="Gang Beasts OST" />
     <meta property="og:description" content="A web player for the Gang Beasts OST" />
     <meta
@@ -56,6 +59,7 @@
           <button class="dropdown-item" role="menuitem" data-value="all" aria-pressed="true">Show all tracks</button>
           <button class="dropdown-item" role="menuitem" data-value="exclude" aria-pressed="false">Exclude custom maps</button>
           <button class="dropdown-item" role="menuitem" data-value="only" aria-pressed="false">Only custom maps</button>
+          <button id="customViewFilterItem" class="dropdown-item" role="menuitem" data-value="custom" aria-pressed="false" style="display:none">Custom exclusions</button>
         </div>
       </div>
       <button id="downloadAllBtn" class="preload-all" title="Download all tracks" aria-label="Download all tracks" data-tooltip="Download every track as a ZIP">
@@ -68,12 +72,20 @@
       </a>
       <button id="helpBtn" class="preload-all" title="About & Help" aria-label="About and help">
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
-        About & Help
+        <span class="help-btn-label">About &amp; Help</span>
       </button>
-    </div>
+      <button id="settingsBtn" class="preload-all" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.51.4 1.05.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.23 1.12-.54 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"/></svg>
+        <span class="settings-btn-label">Settings</span>
+      </button>
+      <button id="historyBtn" class="preload-all" title="Listen history" aria-label="Listen history" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        <span class="history-btn-label">History</span>
+      </button>    </div>
 
     <div class="search-wrap">
       <input id="searchInput" class="search-input" type="search" placeholder="Search songs…" aria-label="Search songs" autocomplete="off" spellcheck="false">
+      <span id="ostDurationEl" class="ost-duration-label"></span>
     </div>
 
     <section class="track-list" id="trackList" aria-live="polite"></section>
@@ -119,6 +131,14 @@
           <span>Toggle loop</span>
         </div>
         <div class="keyboard-hint__item">
+          <kbd>A</kbd>
+          <span>Toggle autoplay</span>
+        </div>
+        <div class="keyboard-hint__item">
+          <kbd>H</kbd>
+          <span>Open history</span>
+        </div>
+        <div class="keyboard-hint__item">
           <kbd>S</kbd>
           <span>Toggle shuffle</span>
         </div>
@@ -157,6 +177,83 @@
     </div>
   </div>
 
+  <!-- Settings modal -->
+  <div id="settingsModal" class="keyboard-hint" aria-hidden="true">
+    <div class="keyboard-hint__inner settings-modal__inner">
+      <div class="settings-modal__header">
+        <h3>Settings</h3>
+        <div class="settings-modal__tabs" role="tablist" aria-label="Settings pages">
+          <button id="settingsTabGeneral" class="settings-tab active" role="tab" aria-selected="true" data-page="general">General</button>
+          <button id="settingsTabExclusions" class="settings-tab" role="tab" aria-selected="false" data-page="exclusions">Custom Groups</button>
+        </div>
+      </div>
+
+      <div id="settingsPageGeneral" class="settings-page" aria-hidden="false">
+        <label class="settings-row">
+          <div class="settings-row__text">
+            <strong>Reduce animations</strong>
+            <span>Stops pulsing and makes interactions more snappy.</span>
+          </div>
+          <span class="settings-switch">
+            <input id="toggleReduceAnimations" type="checkbox" aria-label="Reduce animations">
+            <span class="settings-slider" aria-hidden="true"></span>
+          </span>
+        </label>
+
+        <label class="settings-row">
+          <div class="settings-row__text">
+            <strong>Lite mode</strong>
+            <span>Disables heavier visual effects for better performance.</span>
+          </div>
+          <span class="settings-switch">
+            <input id="toggleLiteMode" type="checkbox" aria-label="Lite mode">
+            <span class="settings-slider" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+
+      <div id="settingsPageExclusions" class="settings-page" aria-hidden="true" style="display:none">
+        <p class="settings-hint">Add songs to your custom group, then choose <strong>Custom group</strong> in View.</p>
+        <div class="settings-exclusions__profiles">
+          <div id="customProfilesList" class="settings-profiles__list"></div>
+        </div>
+        <div class="settings-exclusions__name">
+          <label for="customExclusionsName" class="settings-hint">Custom group name</label>
+          <div class="settings-exclusions__name-row">
+            <input id="customExclusionsName" class="settings-text-input" type="text" maxlength="40" placeholder="My song group" aria-label="Custom group name">
+            <div class="settings-profiles__actions">
+              <button id="customProfileNewBtn" class="modal-action-btn settings-action" type="button">New</button>
+              <button id="customProfileDeleteBtn" class="modal-action-btn settings-action" type="button">Delete</button>
+            </div>
+          </div>
+        </div>
+        <div class="settings-exclusions__mode" role="group" aria-label="Custom list mode">
+          <button id="customModeExclude" class="settings-mode-btn active" type="button" data-mode="exclude">Exclusions (blacklist)</button>
+          <button id="customModeInclude" class="settings-mode-btn" type="button" data-mode="include">Inclusions (whitelist)</button>
+        </div>
+        <div class="settings-exclusions__add">
+          <div id="customExcludeSelectWrap" class="settings-custom-select">
+            <button id="customExcludeTrigger" class="settings-select-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Select song to exclude">
+              <span id="customExcludeTriggerLabel">Select a track...</span>
+              <svg viewBox="0 0 12 8" width="12" height="8" aria-hidden="true" focusable="false"><path d="M1 1l5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
+            </button>
+            <div id="customExcludeMenu" class="settings-select-menu" role="listbox" aria-hidden="true">
+              <div class="settings-select-search-wrap">
+                <input id="customExcludeSearch" class="settings-select-search" type="search" placeholder="Search tracks..." autocomplete="off" spellcheck="false" aria-label="Search tracks">
+              </div>
+              <div id="customExcludeOptions" class="settings-select-options"></div>
+            </div>
+          </div>
+          <button id="customExcludeAddBtn" class="modal-action-btn settings-action" type="button">Add</button>
+        </div>
+        <div id="customExcludeList" class="settings-exclusions__list"></div>
+        <div class="settings-exclusions__actions">
+          <button id="customExcludeClearBtn" class="modal-action-btn settings-action" type="button">Clear all</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Track context menu -->
   <div id="trackContextMenu" class="context-menu hidden">
     <button class="context-menu__item" data-action="play">
@@ -189,6 +286,7 @@
           </button>
         </div>
         <div id="miniArtist" class="mini-artist"></div>
+        <div id="miniTrackCounter" class="mini-track-counter"></div>
       </div>
     </div>
     <div class="mini-controls">
@@ -199,8 +297,12 @@
         <button id="miniPrev" class="mini-btn" title="Previous">⏮</button>
         <button id="miniPlay" class="mini-btn" title="Play">▶</button>
         <button id="miniNext" class="mini-btn" title="Next">⏭</button>
-        <button id="miniLoop" class="mini-btn" title="Loop" aria-pressed="false">
+        <button id="miniLoop" class="mini-btn" title="Loop" aria-pressed="false" data-loop="off">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M464 210.511V264a112.127 112.127 0 0 1-112 112H78.627l44.686-44.687l-22.626-22.626L56 353.373l-4.415 4.414l-33.566 33.567l74.022 83.276l23.918-21.26L75.63 408H352c79.4 0 144-64.6 144-144v-85.489Z"/><path fill="currentColor" d="M48 256a112.127 112.127 0 0 1 112-112h273.373l-44.686 44.687l22.626 22.626L456 166.627l4.117-4.116l33.864-33.865l-74.022-83.276l-23.918 21.26L436.37 112H160c-79.4 0-144 64.6-144 144v85.787l32-32Z"/></svg>
+          <span class="loop-one-badge" style="display:none">1</span>
+        </button>
+        <button id="miniAutoplay" class="mini-btn active" title="Autoplay (on)" aria-pressed="true">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><title>Autoplay</title><path fill="currentColor" fill-rule="evenodd" d="M11.194.665a8 8 0 1 0 4.194 10.404a.75.75 0 0 0-1.385-.575a6.5 6.5 0 1 1-.526-5.994H11.75a.75.75 0 0 0 0 1.5H16V1.75a.75.75 0 0 0-1.5 0v1.586a8 8 0 0 0-3.306-2.67Zm-.423 6.913a.5.5 0 0 1 0 .844l-4.003 2.54A.5.5 0 0 1 6 10.538V5.461a.5.5 0 0 1 .768-.422z" clip-rule="evenodd"/></svg>
         </button>
       </div>
     </div>
@@ -236,6 +338,7 @@
           </button>
         </div>
         <div class="m-artist" id="mArtist">Artist</div>
+        <div id="mTrackCounter" class="m-track-counter"></div>
 
         <div class="m-progress">
           <div class="times"><span id="mCur">0:00</span><span id="mRem">-0:00</span></div>
@@ -249,11 +352,15 @@
           <button id="mPrev">⏮</button>
           <button id="mPlay">▶</button>
           <button id="mNext">⏭</button>
-          <button id="mLoop" title="Loop" aria-pressed="false">
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><title>Loop SVG Icon</title><path fill="currentColor" d="M464 210.511V264a112.127 112.127 0 0 1-112 112H78.627l44.686-44.687l-22.626-22.626L56 353.373l-4.415 4.414l-33.566 33.567l74.022 83.276l23.918-21.26L75.63 408H352c79.4 0 144-64.6 144-144v-85.489Z"/><path fill="currentColor" d="M48 256a112.127 112.127 0 0 1 112-112h273.373l-44.686 44.687l22.626 22.626L456 166.627l4.117-4.116l33.864-33.865l-74.022-83.276l-23.918 21.26L436.37 112H160c-79.4 0-144 64.6-144 144v85.787l32-32Z"/></svg>
+          <button id="mLoop" title="Loop" aria-pressed="false" data-loop="off">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512" aria-hidden="true" focusable="false"><title>Loop</title><path fill="currentColor" d="M464 210.511V264a112.127 112.127 0 0 1-112 112H78.627l44.686-44.687l-22.626-22.626L56 353.373l-4.415 4.414l-33.566 33.567l74.022 83.276l23.918-21.26L75.63 408H352c79.4 0 144-64.6 144-144v-85.489Z"/><path fill="currentColor" d="M48 256a112.127 112.127 0 0 1 112-112h273.373l-44.686 44.687l22.626 22.626L456 166.627l4.117-4.116l33.864-33.865l-74.022-83.276l-23.918 21.26L436.37 112H160c-79.4 0-144 64.6-144 144v85.787l32-32Z"/></svg>
+            <span class="loop-one-badge" style="display:none">1</span>
+          </button>
+          <button id="mAutoplay" class="active" title="Autoplay (on)" aria-pressed="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><title>Autoplay</title><path fill="currentColor" fill-rule="evenodd" d="M11.194.665a8 8 0 1 0 4.194 10.404a.75.75 0 0 0-1.385-.575a6.5 6.5 0 1 1-.526-5.994H11.75a.75.75 0 0 0 0 1.5H16V1.75a.75.75 0 0 0-1.5 0v1.586a8 8 0 0 0-3.306-2.67Zm-.423 6.913a.5.5 0 0 1 0 .844l-4.003 2.54A.5.5 0 0 1 6 10.538V5.461a.5.5 0 0 1 .768-.422z" clip-rule="evenodd"/></svg>
           </button>
           <button id="mWaveform" title="Waveform Visualization" aria-pressed="false">
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 56 56" aria-hidden="true" focusable="false"><title>Waveform SVG Icon</title><path fill="currentColor" d="M24.59 49.574c.96 0 1.664-.726 1.664-1.64V8.066c0-.914-.703-1.64-1.664-1.64c-.938 0-1.64.726-1.64 1.64v39.868c0 .914.702 1.64 1.64 1.64m13.64-4.687c.938 0 1.641-.75 1.641-1.664V12.777c0-.914-.703-1.664-1.64-1.664c-.938 0-1.665.75-1.665 1.664v30.446c0 .914.727 1.664 1.664 1.664M17.793 41.09c.938 0 1.64-.727 1.64-1.64v-22.9c0-.913-.703-1.64-1.64-1.64c-.961 0-1.664.727-1.664 1.64v22.9c0 .913.703 1.64 1.664 1.64m13.617-2.531c.938 0 1.664-.727 1.664-1.641V19.082c0-.914-.726-1.64-1.664-1.64c-.937 0-1.64.726-1.64 1.64v17.836c0 .914.703 1.64 1.64 1.64m13.64-4.196c.938 0 1.641-.75 1.641-1.664V23.3c0-.914-.703-1.664-1.64-1.664a1.64 1.64 0 0 0-1.664 1.664v9.398a1.64 1.64 0 0 0 1.664 1.664m-34.077-1.851c.937 0 1.64-.727 1.64-1.64v-5.743c0-.914-.703-1.64-1.64-1.64c-.961 0-1.664.726-1.664 1.64v5.742c0 .914.703 1.64 1.664 1.64"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 56 56" aria-hidden="true" focusable="false"><title>Waveform</title><path fill="currentColor" d="M24.59 49.574c.96 0 1.664-.726 1.664-1.64V8.066c0-.914-.703-1.64-1.664-1.64c-.938 0-1.64.726-1.64 1.64v39.868c0 .914.702 1.64 1.64 1.64m13.64-4.687c.938 0 1.641-.75 1.641-1.664V12.777c0-.914-.703-1.664-1.64-1.664c-.938 0-1.665.75-1.665 1.664v30.446c0 .914.727 1.664 1.664 1.664M17.793 41.09c.938 0 1.64-.727 1.64-1.64v-22.9c0-.913-.703-1.64-1.64-1.64c-.961 0-1.664.727-1.664 1.64v22.9c0 .913.703 1.64 1.664 1.64m13.617-2.531c.938 0 1.664-.727 1.664-1.641V19.082c0-.914-.726-1.64-1.664-1.64c-.937 0-1.64.726-1.64 1.64v17.836c0 .914.703 1.64 1.64 1.64m13.64-4.196c.938 0 1.641-.75 1.641-1.664V23.3c0-.914-.703-1.664-1.64-1.664a1.64 1.64 0 0 0-1.664 1.664v9.398a1.64 1.64 0 0 0 1.664 1.664m-34.077-1.851c.937 0 1.64-.727 1.64-1.64v-5.743c0-.914-.703-1.64-1.64-1.64c-.961 0-1.664.726-1.664 1.64v5.742c0 .914.703 1.64 1.664 1.64"/></svg>
           </button>
         </div>
         <div class="m-volume" style="margin-top:12px;display:flex;align-items:center;gap:10px">
@@ -276,6 +383,54 @@
       </div>
     </div>
   </div>
+  <!-- History panel -->
+  <div id="historyPanel" class="history-panel" aria-hidden="true" role="complementary" aria-label="Listen history">
+    <div class="history-panel__header">
+      <div class="history-panel__title">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        Listen History
+      </div>
+      <div class="history-panel__actions">
+        <span id="historyStats" class="history-panel__stats"></span>
+        <button id="historyClearBtn" class="history-panel__clear" title="Clear history">Clear</button>
+        <button id="historyCloseBtn" class="history-panel__close" title="Close" aria-label="Close history">✕</button>
+      </div>
+    </div>
+    <div id="historyList" class="history-panel__list" role="list"></div>
+  </div>
+  <div id="historyOverlay" class="history-overlay"></div>
+
+  <!-- Changelog toast (v2.0.0) -->
+  <div id="changelogToast" class="changelog-toast" aria-hidden="true">
+    <div class="changelog-toast__header">
+      <div class="changelog-toast__title">
+        <span class="changelog-toast__badge">v2.0.0</span>
+        <span>Site Updated</span>
+      </div>
+      <div class="changelog-toast__actions">
+        <button class="changelog-toast__toggle" id="changelogToggle" aria-label="Expand changelog" title="See what's new">What's new</button>
+        <button class="changelog-toast__close" id="changelogClose" aria-label="Dismiss">✕</button>
+      </div>
+    </div>
+    <div class="changelog-toast__body" id="changelogBody">
+      <ul class="changelog-toast__list">
+        <li><strong>Beat-reactive pulse</strong> — album art, mini player &amp; track cards pulse to the melody</li>
+        <li><strong>3-mode loop</strong> — click loop to cycle: loop track, loop all, or off</li>
+        <li><strong>Autoplay toggle</strong> — disable to stop after the current track; turns off shuffle &amp; loop-all</li>
+        <li><strong>Autoplay end behavior in fullscreen</strong> — when autoplay is off and a song ends, playback stops while keeping the current song UI visible</li>
+        <li><strong>OST duration label</strong> — total runtime shown next to search, respects view filter</li>
+        <li><strong>Inline track durations</strong> — hover a card to reveal its length</li>
+        <li><strong>Track X of Y counter</strong> — shown in the modal &amp; mini player</li>
+        <li><strong>Listen history</strong> — the History button tracks every song you play, with timestamps and a play-again button; persists across refreshes</li>
+        <li><strong>Settings modal</strong> — new dedicated settings panel with General and Custom Groups pages</li>
+        <li><strong>Reduce animations mode</strong> — disables pulsing/animation-heavy transitions for snappier behavior</li>
+        <li><strong>Lite mode</strong> — reduces heavier visual effects and disables spectrum particles for better performance</li>
+        <li><strong>Custom groups view filter</strong> — build your own blacklist/whitelist-track list and filter with a new View option</li>
+        <li><strong>UI polish</strong> — sharper typography, refined cards, richer blur effects</li>
+      </ul>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="script.js" type="module"></script>
 </body>

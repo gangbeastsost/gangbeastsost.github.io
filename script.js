@@ -52,7 +52,34 @@ const keyboardHint = document.getElementById('keyboardHint');
 const infoModal = document.getElementById('infoModal');
 const helpBtn = document.getElementById('helpBtn');
 const showHotkeysBtn = document.getElementById('showHotkeysBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const settingsTabGeneral = document.getElementById('settingsTabGeneral');
+const settingsTabExclusions = document.getElementById('settingsTabExclusions');
+const settingsPageGeneral = document.getElementById('settingsPageGeneral');
+const settingsPageExclusions = document.getElementById('settingsPageExclusions');
+const toggleReduceAnimationsEl = document.getElementById('toggleReduceAnimations');
+const toggleLiteModeEl = document.getElementById('toggleLiteMode');
+const customExcludeSelectWrap = document.getElementById('customExcludeSelectWrap');
+const customExcludeTrigger = document.getElementById('customExcludeTrigger');
+const customExcludeTriggerLabel = document.getElementById('customExcludeTriggerLabel');
+const customExcludeMenu = document.getElementById('customExcludeMenu');
+const customExcludeSearch = document.getElementById('customExcludeSearch');
+const customExcludeOptions = document.getElementById('customExcludeOptions');
+const customProfilesList = document.getElementById('customProfilesList');
+const customProfileNewBtn = document.getElementById('customProfileNewBtn');
+const customProfileDeleteBtn = document.getElementById('customProfileDeleteBtn');
+const customModeExcludeBtn = document.getElementById('customModeExclude');
+const customModeIncludeBtn = document.getElementById('customModeInclude');
+const customExclusionsNameInput = document.getElementById('customExclusionsName');
+const customExcludeAddBtn = document.getElementById('customExcludeAddBtn');
+const customExcludeList = document.getElementById('customExcludeList');
+const customExcludeClearBtn = document.getElementById('customExcludeClearBtn');
+const customViewFilterItem = document.getElementById('customViewFilterItem');
 const trackContextMenu = document.getElementById('trackContextMenu');
+const ostDurationEl = document.getElementById('ostDurationEl');
+const mTrackCounter = document.getElementById('mTrackCounter');
+const miniTrackCounter = document.getElementById('miniTrackCounter');
 let contextMenuTrackIndex = -1;
 
 // Media Session (lock screen / OS media controls)
@@ -74,7 +101,7 @@ function setupIOSPauseOnBackground(){
     const maybePause = ()=>{
       try{
         if(!audio || !audio.src) return;
-        const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+        const loopActive = loopMode === 'one';
         if(!loopActive) return;
         if(!isPlaying) return;
         pause();
@@ -299,7 +326,7 @@ function updateMediaSessionPosition(force=false){
 function _seekToSeconds(targetSeconds){
   try{
     const file = tracks[index] && tracks[index].file;
-    const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+    const loopActive = loopMode === 'one';
     const buf = (loopActive && file) ? bufferCache.get(file) : null;
     const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
     const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
@@ -369,9 +396,23 @@ function hidePreloadToast(){
 }
 
 let tracks = [];
+let trackDurations = [];
+let durationLoadedCount = 0;
 let index = 0;
 let isPlaying = false;
 let isShuffling = false;
+let loopMode = 'off'; // 'off' | 'one' | 'all'
+let isAutoplay = true;
+let _clearingNoSong = false;
+let isReducedAnimations = false;
+let isLiteMode = false;
+let customExclusionFiles = [];
+let customExclusionsName = '';
+let customExclusionsMode = 'exclude'; // 'exclude' | 'include'
+let customFilters = []; // [{id,name,mode,files[]}]
+let activeCustomFilterId = '';
+let customExcludePendingFile = '';
+let customExcludeSearchQuery = '';
 let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
@@ -379,6 +420,16 @@ let searchQuery = '';
 
 let recentlyPlayed = []; // Array of track indices (max 20)
 const MAX_RECENT = 20;
+let listenHistory = []; // {title,artist,image,duration,stage,side,ts}
+const MAX_HISTORY = 200;
+const HISTORY_KEY = 'gb:history';
+const REDUCE_ANIMATIONS_KEY = 'gb:reduceAnimations';
+const LITE_MODE_KEY = 'gb:liteMode';
+const CUSTOM_EXCLUSIONS_KEY = 'gb:customExclusions';
+const CUSTOM_EXCLUSIONS_NAME_KEY = 'gb:customExclusionsName';
+const CUSTOM_FILTERS_KEY = 'gb:customFilters';
+const CUSTOM_FILTERS_ACTIVE_KEY = 'gb:customFiltersActive';
+let _historyRecordedForIndex = -1; // dedup: only record once per play() call per track
 
 const OFFICIAL_ARTIST = 'doseone & Bob Larder';
 
@@ -401,14 +452,319 @@ function isTrackAllowedByViewFilter(t){
   try{
     if(!t) return false;
     const artist = (t.artist ? String(t.artist).trim() : '');
+    const fileKey = (t.file ? String(t.file).trim() : '');
     if(currentViewFilter === 'exclude'){
       return artist === OFFICIAL_ARTIST;
     }
     if(currentViewFilter === 'only'){
       return artist !== OFFICIAL_ARTIST;
     }
+    if(currentViewFilter === 'custom'){
+      if(!Array.isArray(customExclusionFiles) || customExclusionFiles.length === 0) return true;
+      if(customExclusionsMode === 'include') return customExclusionFiles.includes(fileKey);
+      return !customExclusionFiles.includes(fileKey);
+    }
     return true;
   }catch(e){ return true; }
+}
+
+function _newCustomFilter(name = ''){
+  const base = String(name || '').trim();
+  return {
+    id: `cf_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+    name: base,
+    mode: 'exclude',
+    files: []
+  };
+}
+
+function _getActiveCustomFilter(){
+  if(!Array.isArray(customFilters) || customFilters.length === 0) return null;
+  let cur = customFilters.find(f => f && f.id === activeCustomFilterId);
+  if(!cur){
+    cur = customFilters[0];
+    activeCustomFilterId = cur?.id || '';
+  }
+  return cur || null;
+}
+
+function _loadActiveCustomFilterState(){
+  const cur = _getActiveCustomFilter();
+  if(!cur){
+    customExclusionFiles = [];
+    customExclusionsName = '';
+    customExclusionsMode = 'exclude';
+    return;
+  }
+  customExclusionFiles = Array.isArray(cur.files) ? cur.files.map(x=>String(x||'').trim()).filter(Boolean) : [];
+  customExclusionsName = String(cur.name || '').trim();
+  customExclusionsMode = (cur.mode === 'include') ? 'include' : 'exclude';
+}
+
+function _saveActiveCustomFilterState(){
+  const cur = _getActiveCustomFilter();
+  if(!cur) return;
+  cur.name = String(customExclusionsName || '').trim();
+  cur.mode = (customExclusionsMode === 'include') ? 'include' : 'exclude';
+  cur.files = Array.isArray(customExclusionFiles) ? [...new Set(customExclusionFiles.map(x=>String(x||'').trim()).filter(Boolean))] : [];
+}
+
+function saveCustomFilters(){
+  try{
+    _saveActiveCustomFilterState();
+    localStorage.setItem(CUSTOM_FILTERS_KEY, JSON.stringify(customFilters || []));
+    localStorage.setItem(CUSTOM_FILTERS_ACTIVE_KEY, String(activeCustomFilterId || ''));
+  }catch(e){}
+}
+
+function updateCustomModeButtons(){
+  try{
+    const hasActiveGroup = !!_getActiveCustomFilter();
+    const isInclude = customExclusionsMode === 'include';
+    if(customModeExcludeBtn) customModeExcludeBtn.classList.toggle('active', !isInclude);
+    if(customModeIncludeBtn) customModeIncludeBtn.classList.toggle('active', isInclude);
+    if(customModeExcludeBtn) customModeExcludeBtn.disabled = !hasActiveGroup;
+    if(customModeIncludeBtn) customModeIncludeBtn.disabled = !hasActiveGroup;
+  }catch(e){}
+}
+
+function updateCustomGroupControls(){
+  try{
+    const hasActiveGroup = !!_getActiveCustomFilter();
+    if(customExclusionsNameInput) customExclusionsNameInput.disabled = !hasActiveGroup;
+    if(customExcludeTrigger) customExcludeTrigger.disabled = !hasActiveGroup;
+    if(customExcludeAddBtn) customExcludeAddBtn.disabled = !hasActiveGroup;
+    if(customProfileDeleteBtn) customProfileDeleteBtn.disabled = !hasActiveGroup;
+  }catch(e){}
+}
+
+function renderCustomProfilesList(){
+  try{
+    if(!customProfilesList) return;
+    if(!Array.isArray(customFilters) || customFilters.length === 0){
+      customProfilesList.innerHTML = '<span class="settings-empty" style="width:100%">No groups yet</span>';
+      updateCustomGroupControls();
+      return;
+    }
+    customProfilesList.innerHTML = customFilters.map(f=>{
+      const active = f.id === activeCustomFilterId;
+      const modeLabel = f.mode === 'include' ? 'Include' : 'Exclude';
+      return `<button type="button" class="settings-profile-pill${active ? ' active' : ''}" data-profile-id="${escapeHtml(f.id)}"><span>${escapeHtml(f.name || 'Custom group')}</span><span class="settings-profile-pill__mode">${modeLabel}</span></button>`;
+    }).join('');
+    updateCustomGroupControls();
+  }catch(e){}
+}
+
+function setActiveCustomFilter(id){
+  try{
+    const next = customFilters.find(f => f && f.id === id);
+    if(!next) return;
+    _saveActiveCustomFilterState();
+    activeCustomFilterId = next.id;
+    _loadActiveCustomFilterState();
+    updateCustomModeButtons();
+    renderCustomProfilesList();
+    updateCustomGroupControls();
+    updateCustomFilterOption();
+    if(customExclusionsNameInput) customExclusionsNameInput.value = customExclusionsName || '';
+    setCustomExcludeSelection('');
+    populateCustomExcludeSelect();
+    renderCustomExclusionsList();
+    syncViewDropdownPressed();
+    try{ localStorage.setItem(CUSTOM_FILTERS_ACTIVE_KEY, String(activeCustomFilterId || '')); }catch(e){}
+  }catch(e){}
+}
+
+function applyVisualSettings(){
+  try{ document.body.classList.toggle('reduce-animations', !!isReducedAnimations); }catch(e){}
+  try{ document.body.classList.toggle('lite-mode', !!isLiteMode); }catch(e){}
+  try{
+    if(isLiteMode){ spectrumParticles = []; }
+    if(isReducedAnimations || isLiteMode){
+      stopBeatPulse();
+    }else if(isPlaying){
+      startBeatPulse();
+    }
+  }catch(e){}
+}
+
+function isCustomFilterAvailable(){
+  try{ return Array.isArray(customExclusionFiles) && customExclusionFiles.length > 0; }catch(e){ return false; }
+}
+
+function updateCustomFilterOption(){
+  try{
+    if(!customViewFilterItem) return;
+    const show = isCustomFilterAvailable();
+    const customLabel = (customExclusionsName && customExclusionsName.trim()) ? customExclusionsName.trim() : 'Custom group';
+    customViewFilterItem.textContent = customLabel;
+    customViewFilterItem.style.display = show ? 'block' : 'none';
+    if(!show && currentViewFilter === 'custom'){
+      currentViewFilter = 'all';
+      window.currentViewFilter = currentViewFilter;
+      try{ localStorage.setItem('gb:viewFilter', currentViewFilter); }catch(e){}
+    }
+  }catch(e){}
+}
+
+function syncViewDropdownPressed(){
+  try{
+    if(!viewDropdown) return;
+    viewDropdown.querySelectorAll('.dropdown-item').forEach(d=>{
+      const v = d.dataset.value;
+      d.setAttribute('aria-pressed', v === currentViewFilter ? 'true' : 'false');
+    });
+  }catch(e){}
+}
+
+function saveCustomExclusions(){
+  try{
+    _saveActiveCustomFilterState();
+    saveCustomFilters();
+    localStorage.setItem(CUSTOM_EXCLUSIONS_KEY, JSON.stringify(customExclusionFiles || []));
+    localStorage.setItem(CUSTOM_EXCLUSIONS_NAME_KEY, String(customExclusionsName || ''));
+  }catch(e){}
+}
+
+function escapeHtml(s){
+  try{
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }catch(e){ return ''; }
+}
+
+function renderCustomExclusionsList(){
+  try{
+    if(!customExcludeList) return;
+    if(!_getActiveCustomFilter()){
+      customExcludeList.innerHTML = '<div class="settings-empty">Create a group to add tracks.</div>';
+      return;
+    }
+    if(!Array.isArray(customExclusionFiles) || customExclusionFiles.length === 0){
+      customExcludeList.innerHTML = '<div class="settings-empty">No tracks in this group yet.</div>';
+      return;
+    }
+    const cards = customExclusionFiles.map((file)=>{
+      const t = tracks.find(x => (x && x.file ? String(x.file).trim() : '') === file);
+      const title = t?.title || file;
+      const artist = t?.artist || 'Unknown artist';
+      return `
+        <div class="settings-exclusion-item" data-file="${escapeHtml(file)}">
+          <div class="settings-exclusion-item__text">
+            <div class="settings-exclusion-item__title">${escapeHtml(title)}</div>
+            <div class="settings-exclusion-item__meta">${escapeHtml(artist)}</div>
+          </div>
+          <button class="settings-exclusion-item__remove" data-remove-file="${escapeHtml(file)}" title="Remove">✕</button>
+        </div>
+      `;
+    });
+    customExcludeList.innerHTML = cards.join('');
+  }catch(e){}
+}
+
+function closeCustomExcludeMenu(){
+  try{
+    if(customExcludeSelectWrap) customExcludeSelectWrap.classList.remove('open');
+    if(customExcludeTrigger) customExcludeTrigger.setAttribute('aria-expanded', 'false');
+    if(customExcludeMenu) customExcludeMenu.setAttribute('aria-hidden', 'true');
+    customExcludeSearchQuery = '';
+    if(customExcludeSearch) customExcludeSearch.value = '';
+  }catch(e){}
+}
+
+function setCustomExcludeSelection(file){
+  try{
+    if(!_getActiveCustomFilter()){
+      customExcludePendingFile = '';
+      if(customExcludeTriggerLabel) customExcludeTriggerLabel.textContent = 'Create a group first';
+      return;
+    }
+    customExcludePendingFile = String(file || '').trim();
+    let label = 'Select a track...';
+    if(customExcludePendingFile){
+      const t = tracks.find(x => (x && x.file ? String(x.file).trim() : '') === customExcludePendingFile);
+      label = t ? `${t.title || customExcludePendingFile}${t.artist ? ' — ' + t.artist : ''}` : customExcludePendingFile;
+    }
+    if(customExcludeTriggerLabel) customExcludeTriggerLabel.textContent = label;
+  }catch(e){}
+}
+
+function populateCustomExcludeSelect(){
+  try{
+    if(!customExcludeOptions) return;
+    if(!_getActiveCustomFilter()){
+      customExcludeOptions.innerHTML = '<button type="button" class="settings-select-option is-disabled" disabled>Create a group first</button>';
+      setCustomExcludeSelection('');
+      return;
+    }
+    const q = String(customExcludeSearchQuery || '').trim().toLowerCase();
+    const options = [];
+    tracks.forEach((t)=>{
+      if(!t || !t.file) return;
+      const file = String(t.file).trim();
+      const title = String(t.title || file);
+      const artist = String(t.artist || '');
+      if(q){
+        const hay = `${title} ${artist} ${String(t.stage||'')} ${String(t.side||'')} ${file}`.toLowerCase();
+        if(!hay.includes(q)) return;
+      }
+      const isDisabled = customExclusionFiles.includes(file);
+      const isSelected = customExcludePendingFile === file;
+      const cls = `settings-select-option${isDisabled ? ' is-disabled' : ''}${isSelected ? ' is-selected' : ''}`;
+      const imgSrc = t.image ? encodeURI(t.image) : getDefaultCover();
+      options.push(`<button type="button" class="${cls}" data-file="${escapeHtml(file)}" ${isDisabled ? 'disabled' : ''}><img class="settings-select-option__cover" src="${imgSrc}" alt="" loading="lazy" onerror="this.src='${getDefaultCover()}'"><span class="settings-select-option__text"><span class="settings-select-option__title">${escapeHtml(title)}</span><span class="settings-select-option__meta">${escapeHtml(artist || 'Unknown artist')}</span></span></button>`);
+    });
+    if(!options.length){
+      customExcludeOptions.innerHTML = '<button type="button" class="settings-select-option is-disabled" disabled>No matching tracks</button>';
+    }else{
+      customExcludeOptions.innerHTML = options.join('');
+    }
+
+    if(customExcludePendingFile){
+      const stillExists = tracks.some(t => (t && t.file ? String(t.file).trim() : '') === customExcludePendingFile);
+      if(!stillExists || customExclusionFiles.includes(customExcludePendingFile)) setCustomExcludeSelection('');
+    }
+    if(!customExcludePendingFile) setCustomExcludeSelection('');
+  }catch(e){}
+}
+
+function showSettingsPage(page){
+  try{
+    const showGeneral = page !== 'exclusions';
+    if(settingsPageGeneral){ settingsPageGeneral.style.display = showGeneral ? 'block' : 'none'; settingsPageGeneral.setAttribute('aria-hidden', showGeneral ? 'false' : 'true'); }
+    if(settingsPageExclusions){ settingsPageExclusions.style.display = showGeneral ? 'none' : 'block'; settingsPageExclusions.setAttribute('aria-hidden', showGeneral ? 'true' : 'false'); }
+    if(settingsTabGeneral){ settingsTabGeneral.classList.toggle('active', showGeneral); settingsTabGeneral.setAttribute('aria-selected', showGeneral ? 'true' : 'false'); }
+    if(settingsTabExclusions){ settingsTabExclusions.classList.toggle('active', !showGeneral); settingsTabExclusions.setAttribute('aria-selected', showGeneral ? 'false' : 'true'); }
+    if(!showGeneral){
+      closeCustomExcludeMenu();
+      setCustomExcludeSelection('');
+      if(customExclusionsNameInput) customExclusionsNameInput.value = customExclusionsName || '';
+      renderCustomProfilesList();
+      updateCustomModeButtons();
+      populateCustomExcludeSelect();
+      renderCustomExclusionsList();
+    }
+  }catch(e){}
+}
+
+function toggleSettingsModal(force){
+  try{
+    if(!settingsModal) return;
+    const currentlyHidden = settingsModal.getAttribute('aria-hidden') === 'true';
+    const shouldOpen = (typeof force === 'boolean') ? force : currentlyHidden;
+    settingsModal.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+    if(shouldOpen){
+      showSettingsPage('general');
+      if(toggleReduceAnimationsEl) toggleReduceAnimationsEl.checked = !!isReducedAnimations;
+      if(toggleLiteModeEl) toggleLiteModeEl.checked = !!isLiteMode;
+    }else{
+      closeCustomExcludeMenu();
+    }
+  }catch(e){}
 }
 
 function getPlayableIndices(){
@@ -826,6 +1182,17 @@ async function init(){
   const resp = await fetch('tracks.json');
   tracks = await resp.json();
 
+  // Seed trackDurations from any pre-baked `duration` fields in tracks.json
+  try{
+    tracks.forEach((t,i)=>{
+      if(typeof t.duration==='number'&&t.duration>0){
+        trackDurations[i]=t.duration;
+        durationLoadedCount++;
+      }
+    });
+    updateOSTDuration();
+  }catch(e){}
+
   // Copy link buttons (hero/mini/modal)
   try{ _setupStaticCopyButtons(); }catch(e){}
 
@@ -838,24 +1205,68 @@ async function init(){
       });
     }
   }catch(e){}
+
+  // restore settings & custom groups
+  try{
+    isReducedAnimations = localStorage.getItem(REDUCE_ANIMATIONS_KEY) === '1';
+    isLiteMode = localStorage.getItem(LITE_MODE_KEY) === '1';
+    const rawFilters = localStorage.getItem(CUSTOM_FILTERS_KEY);
+    if(rawFilters){
+      const parsedFilters = JSON.parse(rawFilters);
+      if(Array.isArray(parsedFilters)){
+        customFilters = parsedFilters.map(f => ({
+          id: String(f?.id || _newCustomFilter().id),
+          name: String(Object.prototype.hasOwnProperty.call(f || {}, 'name') ? (f?.name || '') : 'Custom group').trim(),
+          mode: (f?.mode === 'include') ? 'include' : 'exclude',
+          files: Array.isArray(f?.files) ? f.files.map(x=>String(x||'').trim()).filter(Boolean) : []
+        }));
+      }
+    }
+
+    // migration from legacy single-list keys
+    if(!Array.isArray(customFilters) || customFilters.length === 0){
+      const legacyName = String(localStorage.getItem(CUSTOM_EXCLUSIONS_NAME_KEY) || '').trim();
+      const rawCustom = localStorage.getItem(CUSTOM_EXCLUSIONS_KEY);
+      let legacyFiles = [];
+      if(rawCustom){
+        const parsed = JSON.parse(rawCustom);
+        if(Array.isArray(parsed)) legacyFiles = parsed.map(x=>String(x||'').trim()).filter(Boolean);
+      }
+      if(legacyName || legacyFiles.length > 0){
+        const base = _newCustomFilter(legacyName || 'Custom group');
+        base.files = legacyFiles;
+        customFilters = [base];
+        activeCustomFilterId = base.id;
+        saveCustomFilters();
+      }
+    }
+
+    activeCustomFilterId = String(localStorage.getItem(CUSTOM_FILTERS_ACTIVE_KEY) || '').trim();
+    _loadActiveCustomFilterState();
+  }catch(e){}
+  applyVisualSettings();
+  renderCustomProfilesList();
+  updateCustomModeButtons();
+  updateCustomFilterOption();
+
   // restore saved view filter (persisted across refreshes)
   try{
     const saved = localStorage.getItem('gb:viewFilter');
-    if(saved && (saved === 'all' || saved === 'exclude' || saved === 'only')){
+    if(saved && (saved === 'all' || saved === 'exclude' || saved === 'only' || saved === 'custom')){
       currentViewFilter = saved;
-      window.currentViewFilter = saved;
+      if(currentViewFilter === 'custom' && !isCustomFilterAvailable()) currentViewFilter = 'all';
+      window.currentViewFilter = currentViewFilter;
     }
-    // if the dropdown exists, update aria-pressed state to match
-    try{
-      if(viewDropdown){
-        viewDropdown.querySelectorAll('.dropdown-item').forEach(d=>{
-          const v = d.dataset.value;
-          d.setAttribute('aria-pressed', v === currentViewFilter ? 'true' : 'false');
-        });
-      }
-    }catch(e){}
+    syncViewDropdownPressed();
   }catch(e){}
   renderList();
+
+  // restore listen history FIRST — before any loadTrack call can fire recordHistoryEntry
+  try{
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if(raw){ const parsed = JSON.parse(raw); if(Array.isArray(parsed)) listenHistory = parsed.slice(0, MAX_HISTORY); }
+  }catch(e){ console.warn('restore history failed', e); }
+
   // restore scroll position saved from previous session
   try{
     const savedY = parseInt(localStorage.getItem('gb:scrollY')||'0',10);
@@ -911,11 +1322,26 @@ async function init(){
     const sh = localStorage.getItem('gb:shuffle');
     if(sh==='1'){ setShuffleState(true); }
     const lp = localStorage.getItem('gb:loop');
-    if(lp==='1'){ setLoopState(true); }
+    if(lp === 'one' || lp === 'all'){ setLoopState(lp); }
+    else if(lp === '1'){ setLoopState('one'); } // legacy
+    const ap = localStorage.getItem('gb:autoplay');
+    if(ap === '0'){ setAutoplayState(false); }
     const last = localStorage.getItem('gb:lastIndex');
     // remember last index but do NOT auto-load it on startup — show "No song playing" instead
     if(last!==null){ const li = parseInt(last,10); if(!isNaN(li) && li>=0 && li<tracks.length) { /* lastSaved = li; */ } }
   }catch(e){console.warn('restore settings failed',e)}
+
+  // wire history panel buttons
+  try{
+    const histBtn = document.getElementById('historyBtn');
+    if(histBtn) histBtn.addEventListener('click', ()=>{ toggleHistoryPanel(); });
+    const histClear = document.getElementById('historyClearBtn');
+    if(histClear) histClear.addEventListener('click', ()=>{ clearListenHistory(); });
+    const histClose = document.getElementById('historyCloseBtn');
+    if(histClose) histClose.addEventListener('click', ()=>{ toggleHistoryPanel(); });
+    const histOverlay = document.getElementById('historyOverlay');
+    if(histOverlay) histOverlay.addEventListener('click', ()=>{ toggleHistoryPanel(); });
+  }catch(e){ console.warn('history wiring failed', e); }
 
   // Download All button
   try{
@@ -950,6 +1376,7 @@ async function init(){
         const item = ev.target.closest('.dropdown-item');
         if(!item) return;
         const val = item.dataset.value;
+        if(val === 'custom' && !isCustomFilterAvailable()) return;
         // mark selected
         viewDropdown.querySelectorAll('.dropdown-item').forEach(d=>d.setAttribute('aria-pressed','false'));
         item.setAttribute('aria-pressed','true');
@@ -986,11 +1413,207 @@ async function init(){
         infoModal.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
       }catch(e){}
     };
+
+    const addCustomExclusionFromSelect = ()=>{
+      try{
+        const file = String(customExcludePendingFile || '').trim();
+        if(!file) return;
+        if(!customExclusionFiles.includes(file)) customExclusionFiles.push(file);
+        setCustomExcludeSelection('');
+        saveCustomExclusions();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+        populateCustomExcludeSelect();
+        renderCustomExclusionsList();
+        syncViewDropdownPressed();
+        try{ renderList(); }catch(e){}
+      }catch(e){}
+    };
     
     // Help button opens info modal
     if(helpBtn){
       helpBtn.addEventListener('click', ()=>{
         try{ toggleInfoModal(); }catch(e){}
+      });
+    }
+
+    if(settingsBtn){
+      settingsBtn.addEventListener('click', ()=>{
+        try{ toggleSettingsModal(true); }catch(e){}
+      });
+    }
+
+    if(settingsTabGeneral){ settingsTabGeneral.addEventListener('click', ()=>{ showSettingsPage('general'); }); }
+    if(settingsTabExclusions){ settingsTabExclusions.addEventListener('click', ()=>{ showSettingsPage('exclusions'); }); }
+
+    if(toggleReduceAnimationsEl){
+      toggleReduceAnimationsEl.addEventListener('change', ()=>{
+        isReducedAnimations = !!toggleReduceAnimationsEl.checked;
+        try{ localStorage.setItem(REDUCE_ANIMATIONS_KEY, isReducedAnimations ? '1' : '0'); }catch(e){}
+        applyVisualSettings();
+      });
+    }
+    if(toggleLiteModeEl){
+      toggleLiteModeEl.addEventListener('change', ()=>{
+        isLiteMode = !!toggleLiteModeEl.checked;
+        try{ localStorage.setItem(LITE_MODE_KEY, isLiteMode ? '1' : '0'); }catch(e){}
+        applyVisualSettings();
+      });
+    }
+
+    if(customExcludeAddBtn){ customExcludeAddBtn.addEventListener('click', addCustomExclusionFromSelect); }
+    if(customExclusionsNameInput){
+      customExclusionsNameInput.addEventListener('input', ()=>{
+        if(!_getActiveCustomFilter()) return;
+        customExclusionsName = String(customExclusionsNameInput.value || '').trim();
+        saveCustomExclusions();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+      });
+    }
+
+    if(customProfilesList){
+      customProfilesList.addEventListener('click', (ev)=>{
+        const btn = ev.target.closest('[data-profile-id]');
+        if(!btn) return;
+        const id = String(btn.getAttribute('data-profile-id') || '').trim();
+        if(!id) return;
+        setActiveCustomFilter(id);
+      });
+    }
+    if(customProfileNewBtn){
+      customProfileNewBtn.addEventListener('click', ()=>{
+        const created = _newCustomFilter('');
+        customFilters.push(created);
+        activeCustomFilterId = created.id;
+        _loadActiveCustomFilterState();
+        saveCustomFilters();
+        renderCustomProfilesList();
+        updateCustomModeButtons();
+        updateCustomFilterOption();
+        if(customExclusionsNameInput) customExclusionsNameInput.value = customExclusionsName || '';
+        setCustomExcludeSelection('');
+        populateCustomExcludeSelect();
+        renderCustomExclusionsList();
+      });
+    }
+    if(customProfileDeleteBtn){
+      customProfileDeleteBtn.addEventListener('click', ()=>{
+        if(!Array.isArray(customFilters) || customFilters.length === 0) return;
+        const idx = customFilters.findIndex(f => f && f.id === activeCustomFilterId);
+        if(idx < 0) return;
+        customFilters.splice(idx, 1);
+        if(customFilters.length > 0){
+          const fallback = customFilters[Math.max(0, idx - 1)] || customFilters[0];
+          activeCustomFilterId = fallback.id;
+          _loadActiveCustomFilterState();
+        }else{
+          activeCustomFilterId = '';
+          customExclusionFiles = [];
+          customExclusionsMode = 'exclude';
+          customExclusionsName = '';
+        }
+        saveCustomFilters();
+        if(customFilters.length === 0){
+          try{ localStorage.removeItem(CUSTOM_EXCLUSIONS_KEY); }catch(e){}
+          try{ localStorage.removeItem(CUSTOM_EXCLUSIONS_NAME_KEY); }catch(e){}
+        }
+        renderCustomProfilesList();
+        updateCustomModeButtons();
+        updateCustomGroupControls();
+        updateCustomFilterOption();
+        if(customExclusionsNameInput) customExclusionsNameInput.value = customExclusionsName || '';
+        setCustomExcludeSelection('');
+        populateCustomExcludeSelect();
+        renderCustomExclusionsList();
+        syncViewDropdownPressed();
+        try{ renderList(); }catch(e){}
+      });
+    }
+    if(customModeExcludeBtn){
+      customModeExcludeBtn.addEventListener('click', ()=>{
+        customExclusionsMode = 'exclude';
+        saveCustomExclusions();
+        updateCustomModeButtons();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+        try{ renderList(); }catch(e){}
+      });
+    }
+    if(customModeIncludeBtn){
+      customModeIncludeBtn.addEventListener('click', ()=>{
+        customExclusionsMode = 'include';
+        saveCustomExclusions();
+        updateCustomModeButtons();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+        try{ renderList(); }catch(e){}
+      });
+    }
+    if(customExcludeTrigger){
+      customExcludeTrigger.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const open = !!(customExcludeSelectWrap && customExcludeSelectWrap.classList.contains('open'));
+        if(open){
+          closeCustomExcludeMenu();
+        }else{
+          if(customExcludeSelectWrap) customExcludeSelectWrap.classList.add('open');
+          if(customExcludeTrigger) customExcludeTrigger.setAttribute('aria-expanded', 'true');
+          if(customExcludeMenu) customExcludeMenu.setAttribute('aria-hidden', 'false');
+          if(customExcludeSearch){
+            customExcludeSearchQuery = '';
+            customExcludeSearch.value = '';
+          }
+          populateCustomExcludeSelect();
+          try{ if(customExcludeSearch) customExcludeSearch.focus(); }catch(e){}
+        }
+      });
+    }
+    if(customExcludeSearch){
+      customExcludeSearch.addEventListener('input', ()=>{
+        customExcludeSearchQuery = String(customExcludeSearch.value || '');
+        populateCustomExcludeSelect();
+      });
+      customExcludeSearch.addEventListener('click', (ev)=>{ ev.stopPropagation(); });
+    }
+    if(customExcludeMenu){
+      customExcludeMenu.addEventListener('click', (ev)=>{
+        const opt = ev.target.closest('[data-file]');
+        if(!opt || opt.disabled) return;
+        const file = String(opt.getAttribute('data-file') || '').trim();
+        setCustomExcludeSelection(file);
+        populateCustomExcludeSelect();
+        closeCustomExcludeMenu();
+      });
+    }
+    if(customExcludeList){
+      customExcludeList.addEventListener('click', (ev)=>{
+        const btn = ev.target.closest('[data-remove-file]');
+        if(!btn) return;
+        const file = String(btn.getAttribute('data-remove-file') || '').trim();
+        if(!file) return;
+        customExclusionFiles = customExclusionFiles.filter(x => x !== file);
+        if(customExcludePendingFile === file) setCustomExcludeSelection('');
+        saveCustomExclusions();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+        populateCustomExcludeSelect();
+        renderCustomExclusionsList();
+        syncViewDropdownPressed();
+        try{ renderList(); }catch(e){}
+      });
+    }
+    if(customExcludeClearBtn){
+      customExcludeClearBtn.addEventListener('click', ()=>{
+        customExclusionFiles = [];
+        setCustomExcludeSelection('');
+        saveCustomExclusions();
+        renderCustomProfilesList();
+        updateCustomFilterOption();
+        populateCustomExcludeSelect();
+        renderCustomExclusionsList();
+        syncViewDropdownPressed();
+        try{ renderList(); }catch(e){}
       });
     }
     
@@ -1015,6 +1638,11 @@ async function init(){
     if(infoModal){
       infoModal.addEventListener('click', (ev)=>{
         if(ev.target === infoModal) toggleInfoModal();
+      });
+    }
+    if(settingsModal){
+      settingsModal.addEventListener('click', (ev)=>{
+        if(ev.target === settingsModal) toggleSettingsModal(false);
       });
     }
     
@@ -1053,6 +1681,7 @@ async function init(){
     
     // Click anywhere to close context menu (except on the menu itself)
     document.addEventListener('click', (ev)=>{ 
+      if(customExcludeSelectWrap && !ev.target.closest('#customExcludeSelectWrap')) closeCustomExcludeMenu();
       if(!ev.target.closest('#trackContextMenu')){
         hideContextMenu(); 
       }
@@ -1085,10 +1714,24 @@ async function init(){
           try{ toggleInfoModal(); ev.preventDefault(); }catch(e){}
           return;
         }
+        if(settingsModal && settingsModal.getAttribute('aria-hidden') === 'false'){
+          try{ toggleSettingsModal(false); ev.preventDefault(); }catch(e){}
+          return;
+        }
+        if(modal && !modal.classList.contains('hidden')){
+          try{ closeModal(); ev.preventDefault(); }catch(e){}
+          return;
+        }
       }
       
       if(ev.key === 'l' || ev.key === 'L'){
         try{ toggleLoop(); }catch(e){}
+      }
+      if(ev.key === 'a' || ev.key === 'A'){
+        try{ toggleAutoplay(); }catch(e){}
+      }
+      if(ev.key === 'h' || ev.key === 'H'){
+        try{ toggleHistoryPanel(); }catch(e){}
       }
       if(ev.key === 'ArrowRight' && ev.shiftKey){
         try{ if(audio && audio.src) { skip(1); ev.preventDefault(); } }catch(e){}
@@ -1133,22 +1776,197 @@ async function init(){
       try{ document.body.classList.add('has-track'); }catch(e){}
     }
   }catch(e){}
+  try{ preloadAllDurations(); }catch(e){}
 
 }
 
+function fmtTotal(s){
+  s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
+  return h>0?`${h}h ${m}m`:`${m}m`;
+}
+function updateOSTDuration(){
+  try{
+    if(!ostDurationEl||!tracks||!tracks.length) return;
+    // Apply same view filter + search behavior source as renderList
+    const filtered=tracks.filter((t)=>isTrackAllowedByViewFilter(t));
+    const known=filtered.filter(t=>typeof t.duration==='number'&&t.duration>0);
+    if(!known.length) return;
+    const total=known.reduce((a,t)=>a+t.duration,0);
+    if(total>0){
+      ostDurationEl.textContent=`${fmtTotal(total)} \u00b7 ${filtered.length} tracks`;
+      ostDurationEl.style.opacity='0.75';
+    }
+  }catch(e){}
+}
+// ── Listen History ─────────────────────────────────────────────────────────
+
+function recordHistoryEntry(t){
+  if(!t) return;
+  const entry = {
+    title:    t.title    || '',
+    artist:   t.artist   || '',
+    image:    t.image    || '',
+    duration: t.duration || null,
+    stage:    t.stage    || '',
+    side:     t.side     || '',
+    ts:       Date.now()
+  };
+  listenHistory.unshift(entry);
+  if(listenHistory.length > MAX_HISTORY) listenHistory.length = MAX_HISTORY;
+  try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(listenHistory)); }catch(e){}
+  // live-refresh panel if it's open
+  try{
+    const panel = document.getElementById('historyPanel');
+    if(panel && panel.classList.contains('open')) renderHistoryPanel();
+  }catch(e){}
+}
+
+function _relativeTime(ts){
+  const diff = Date.now() - ts;
+  const sec  = Math.floor(diff / 1000);
+  const min  = Math.floor(sec  / 60);
+  const hr   = Math.floor(min  / 60);
+  const day  = Math.floor(hr   / 24);
+  if(sec < 60)  return 'Just now';
+  if(min < 60)  return `${min}m ago`;
+  if(hr  < 24)  return `${hr}h ago`;
+  if(day === 1) return 'Yesterday';
+  if(day <  7)  return `${day}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, {month:'short', day:'numeric'});
+}
+
+function _fmtDur(sec){
+  if(!sec || !isFinite(sec)) return '';
+  const m = Math.floor(sec/60), s = Math.floor(sec%60);
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+function renderHistoryPanel(){
+  const list = document.getElementById('historyList');
+  const stats = document.getElementById('historyStats');
+  if(!list) return;
+
+  // stats
+  if(stats){
+    if(listenHistory.length === 0){
+      stats.textContent = '';
+    } else {
+      const unique = new Set(listenHistory.map(e => e.title + e.artist)).size;
+      stats.textContent = `${listenHistory.length} play${listenHistory.length===1?'':'s'} \u00b7 ${unique} unique track${unique===1?'':'s'}`;
+    }
+  }
+
+  if(listenHistory.length === 0){
+    list.innerHTML = `
+      <div class="history-empty">
+        <svg viewBox="0 0 24 24" width="40" height="40" aria-hidden="true"><path fill="currentColor" opacity=".35" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        <p>No history yet</p>
+        <span>Tracks you play will appear here</span>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = listenHistory.map((e, idx) => {
+    const dur  = e.duration ? `<span class="history-entry__dur">${_fmtDur(e.duration)}</span>` : '';
+    const time = `<span class="history-entry__time">${_relativeTime(e.ts)}</span>`;
+    const imgSrc = e.image ? encodeURI(e.image) : '';
+    return `
+    <div class="history-entry" data-idx="${idx}" role="listitem">
+      <img class="history-entry__cover" src="${imgSrc}" alt="" loading="lazy" onerror="this.style.opacity='.3'">
+      <div class="history-entry__info">
+        <div class="history-entry__title">${e.title}</div>
+        <div class="history-entry__meta">${e.artist}${dur ? ' &middot; ' + dur : ''}</div>
+      </div>
+      <div class="history-entry__right">
+        ${time}
+        <button class="history-entry__play" data-hist-idx="${idx}" title="Play" aria-label="Play ${e.title}">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // wire play buttons
+  list.querySelectorAll('.history-entry__play').forEach(btn => {
+    btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const hi = parseInt(btn.dataset.histIdx, 10);
+      const entry = listenHistory[hi];
+      if(!entry || !tracks) return;
+      // find track index by matching title + artist
+      const ti = tracks.findIndex(t => t.title === entry.title && (t.artist||'') === entry.artist);
+      if(ti < 0) return;
+      loadTrack(ti, {fade:'cross'});
+      play();
+    });
+  });
+}
+
+function toggleHistoryPanel(){
+  const panel = document.getElementById('historyPanel');
+  const overlay = document.getElementById('historyOverlay');
+  if(!panel) return;
+  const open = panel.classList.toggle('open');
+  panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if(overlay) overlay.classList.toggle('open', open);
+  document.getElementById('historyBtn')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open) renderHistoryPanel();
+}
+
+function clearListenHistory(){
+  listenHistory = [];
+  try{ localStorage.removeItem(HISTORY_KEY); }catch(e){}
+  renderHistoryPanel();
+}
+
+// ── End Listen History ───────────────────────────────────────────────────────
+
+function updateTrackCounter(){
+  try{
+    if(!tracks||!tracks.length) return;
+    const text=`Track ${index+1} of ${tracks.length}`;
+    if(mTrackCounter) mTrackCounter.textContent=text;
+    if(miniTrackCounter) miniTrackCounter.textContent=text;
+  }catch(e){}
+}
+function preloadAllDurations(){
+  if(!tracks||!tracks.length) return;
+  // Check how many are still missing (not baked in)
+  const missing=tracks.reduce((acc,_,i)=>trackDurations[i]?acc:acc+1,0);
+  if(missing===0) return; // all baked in, nothing to do
+  const CONCURRENCY=4;
+  let nextIdx=0;
+  const loadOne=(i)=>{
+    if(i>=tracks.length) return;
+    // Skip tracks that already have a baked-in duration
+    if(trackDurations[i]){ durationLoadedCount++; if(nextIdx<tracks.length) loadOne(nextIdx++); return; }
+    const a=new Audio();
+    a.preload='metadata';
+    a.src=encodeURI(tracks[i].file);
+    const done=()=>{
+      if(isFinite(a.duration)&&a.duration>0) trackDurations[i]=a.duration;
+      try{
+        const card=trackListEl.querySelector(`[data-track-index="${i}"]`);
+        if(card&&trackDurations[i]){
+          const durEl=card.querySelector('.track-dur');
+          if(durEl){ durEl.textContent=fmt(trackDurations[i]); durEl.classList.add('loaded'); }
+        }
+      }catch(e){}
+      durationLoadedCount++;
+      updateOSTDuration();
+      a.src='';
+      if(nextIdx<tracks.length) loadOne(nextIdx++);
+    };
+    a.addEventListener('loadedmetadata',done,{once:true});
+    a.addEventListener('error',done,{once:true});
+  };
+  setTimeout(()=>{for(let i=0;i<Math.min(CONCURRENCY,tracks.length);i++) loadOne(nextIdx++);},1000);
+}
 function renderList(){
   trackListEl.innerHTML = '';
   tracks.forEach((t,i)=>{
     // apply current view filter
-    try{
-      if(currentViewFilter === 'exclude'){
-        // Exclude custom maps: keep only tracks by the official artist
-        if(!t.artist || String(t.artist).trim() !== 'doseone & Bob Larder') return;
-      } else if(currentViewFilter === 'only'){
-        // Only custom maps: show only tracks NOT by the official artist
-        if(t.artist && String(t.artist).trim() === 'doseone & Bob Larder') return;
-      }
-    }catch(e){}
+    try{ if(!isTrackAllowedByViewFilter(t)) return; }catch(e){}
 
     // apply search filter (matches across title/artist/stage/side/file)
     try{
@@ -1164,7 +1982,12 @@ function renderList(){
 
     const el = document.createElement('button');
     el.className = 'track';
-    el.innerHTML = `<img src="${encodeURI(t.image)}" alt="cover"><div class="meta"><div class="title">${t.title}</div><div class="sub">${t.artist||''}</div></div>`;
+    el.innerHTML = `<img src="${encodeURI(t.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${t.title}</span><span class="track-dur">${trackDurations[i]?fmt(trackDurations[i]):''}</span></div><div class="sub">${t.artist||''}</div></div>`;
+    if(trackDurations[i]){
+      const durEl=el.querySelector('.track-dur');
+      if(durEl) durEl.classList.add('loaded');
+    }
+    el.dataset.trackIndex = String(i);
     
     // Right-click for context menu
     el.addEventListener('contextmenu', (ev)=>{
@@ -1198,6 +2021,26 @@ function renderList(){
     }catch(e){}
     trackListEl.appendChild(el);
   })
+  try{ updateTrackActiveState(); }catch(e){}
+  try{ updateOSTDuration(); }catch(e){}
+}
+
+function updateTrackActiveState(){
+  try{
+    if(!trackListEl) return;
+    const hasSong = !!(audio && audio.hasAttribute('src'));
+    const els = trackListEl.querySelectorAll('.track');
+    els.forEach(el=>{
+      const ti = parseInt(el.dataset.trackIndex, 10);
+      if(hasSong && ti === index){
+        el.classList.add('active');
+        if(isPlaying) el.classList.add('playing');
+        else el.classList.remove('playing');
+      } else {
+        el.classList.remove('active','playing');
+      }
+    });
+  }catch(e){}
 }
 
 function showContextMenu(x, y, trackIndex){
@@ -1239,6 +2082,8 @@ function hideContextMenu(){
 
 function loadTrack(i, opts={fade:'cross'}){
   index = i;
+  _historyRecordedForIndex = -1; // reset so next play() records this track fresh
+  try{ updateTrackActiveState(); }catch(e){}
   const t = tracks[i];
   // stop any WebAudio playback when loading a new track to avoid overlap
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
@@ -1257,12 +2102,27 @@ function loadTrack(i, opts={fade:'cross'}){
   if(mArtist) mArtist.textContent = t.artist||'';
   const setImgFade = (el, src, dur=220)=>{
     if(!el) return;
+    if(isReducedAnimations){
+      try{ el.style.transition = 'none'; el.style.opacity = 1; }catch(e){}
+      try{ el.src = src; }catch(e){}
+      return;
+    }
     try{ el.style.transition = `opacity ${dur}ms ease`; el.style.opacity = 0 }catch(e){}
     const tmp = new Image(); tmp.onload = ()=>{ el.src = src; requestAnimationFrame(()=>{ try{ el.style.opacity = 1 }catch(e){} }); }; tmp.src = src;
   };
   if(opts.fade === 'in'){
-    // modal likely just opened; fade background in
-    if(modalBg){ try{ modalBg.style.transition = 'opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){}; modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`; requestAnimationFrame(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} }); }
+    // modal likely just opened; fade background in (or set immediately for reduced animations)
+    if(modalBg){
+      if(isReducedAnimations){
+        try{ modalBg.style.transition = 'none'; }catch(e){}
+        modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+        try{ modalBg.style.opacity = 1; }catch(e){}
+      }else{
+        try{ modalBg.style.transition = 'opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){}
+        modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+        requestAnimationFrame(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} });
+      }
+    }
     setImgFade(mCover, encodeURI(t.image), 320);
     setImgFade(miniCover, encodeURI(t.image), 320);
   } else {
@@ -1274,18 +2134,34 @@ function loadTrack(i, opts={fade:'cross'}){
       // preload image first to avoid flashes when switching rapidly
       const img = new Image();
       img.onload = ()=>{
-        try{ bg2.style.transition = 'opacity 260ms ease'; }catch(e){}
+        try{ bg2.style.transition = isReducedAnimations ? 'none' : 'opacity 260ms ease'; }catch(e){}
         bg2.style.backgroundImage = `url('${encodeURI(t.image)}')`;
         // force frame then fade in
-        requestAnimationFrame(()=>{ try{ bg2.style.opacity = 1 }catch(e){} });
+        if(isReducedAnimations){
+          try{ bg2.style.opacity = 1; }catch(e){}
+        }else{
+          requestAnimationFrame(()=>{ try{ bg2.style.opacity = 1 }catch(e){} });
+        }
         // when transition ends, commit to modalBg and hide bg2
         const onEnd = (ev)=>{ if(ev.target !== bg2) return; try{ bg2.removeEventListener('transitionend', onEnd); _bg2PendingListener = null; modalBg.style.backgroundImage = bg2.style.backgroundImage; bg2.style.opacity = 0 }catch(e){} };
-        _bg2PendingListener = onEnd;
-        bg2.addEventListener('transitionend', onEnd);
+        if(isReducedAnimations){
+          try{ modalBg.style.backgroundImage = bg2.style.backgroundImage; bg2.style.opacity = 0; }catch(e){}
+        }else{
+          _bg2PendingListener = onEnd;
+          bg2.addEventListener('transitionend', onEnd);
+        }
       };
       img.src = t.image;
     } else {
-      if(modalBg){ try{ modalBg.style.opacity = 0 }catch(e){}; setTimeout(()=>{ modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`; try{ modalBg.style.opacity = 1 }catch(e){} }, 220); }
+      if(modalBg){
+        if(isReducedAnimations){
+          modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+          try{ modalBg.style.opacity = 1; }catch(e){}
+        }else{
+          try{ modalBg.style.opacity = 0 }catch(e){};
+          setTimeout(()=>{ modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`; try{ modalBg.style.opacity = 1 }catch(e){} }, 220);
+        }
+      }
     }
     setImgFade(mCover, encodeURI(t.image));
     setImgFade(miniCover, encodeURI(t.image));
@@ -1333,12 +2209,20 @@ function loadTrack(i, opts={fade:'cross'}){
   
   // Aggressively preload next and previous tracks immediately
   try{ preloadNextTrack(); }catch(e){}
+  try{ updateTrackCounter(); }catch(e){}
 }
 
 
 async function play(){
+  // record history once per track, only when actually playing (not on load/restore)
+  try{
+    if(index !== _historyRecordedForIndex && tracks[index]){
+      _historyRecordedForIndex = index;
+      recordHistoryEntry(tracks[index]);
+    }
+  }catch(e){}
   // if loop (gapless) mode enabled try to use WebAudio for seamless loop
-  if(mLoop && mLoop.classList.contains('active')){
+  if(loopMode === 'one'){
     const file = tracks[index] && tracks[index].file;
     if(file){
       // iOS/iPadOS can suspend AudioContext when backgrounded; resume on user gesture.
@@ -1437,6 +2321,8 @@ function setSeekPercent(p){
 
 function startProgress(){
   if(progressRaf) return;
+  try{ updateTrackActiveState(); }catch(e){}
+  try{ startBeatPulse(); }catch(e){}
   const step = ()=>{
     // prefer WebAudio timing when an active web loop is running
     const dur = (webPlaying && webSource && webSource.buffer) ? webSource.buffer.duration : audio.duration;
@@ -1456,7 +2342,7 @@ function startProgress(){
   progressRaf = requestAnimationFrame(step);
 }
 
-function stopProgress(){ if(progressRaf){ cancelAnimationFrame(progressRaf); progressRaf = null; } }
+function stopProgress(){ if(progressRaf){ cancelAnimationFrame(progressRaf); progressRaf = null; } try{ updateTrackActiveState(); }catch(e){} try{ stopBeatPulse(); }catch(e){} }
 
 // modal controls only (main player removed)
 mPlay.addEventListener('click',()=>{isPlaying?pause():play();});
@@ -1466,8 +2352,8 @@ mNext.addEventListener('click',()=>{skip(1)});
 // Shared state helpers for shuffle/loop to sync modal + mini
 function setShuffleState(active){
   isShuffling = !!active;
-  // if enabling shuffle, ensure loop is disabled
-  if(isShuffling){ setLoopState(false); }
+  // if enabling shuffle, ensure loop is disabled; also require autoplay
+  if(isShuffling){ setLoopState(false); if(!isAutoplay) setAutoplayState(true); }
   if(mShuffle) mShuffle.classList.toggle('active', isShuffling);
   if(miniShuffle) miniShuffle.classList.toggle('active', isShuffling);
   try{ if(mShuffle) mShuffle.setAttribute('aria-pressed', isShuffling? 'true':'false'); if(miniShuffle) miniShuffle.setAttribute('aria-pressed', isShuffling? 'true':'false'); }catch(e){}
@@ -1489,19 +2375,75 @@ function setShuffleState(active){
 }
 function toggleShuffle(){ setShuffleState(!isShuffling); }
 
-function setLoopState(active){
-  const a = !!active;
-  // if enabling loop, ensure shuffle is disabled
-  if(a){ setShuffleState(false); }
-  if(mLoop) mLoop.classList.toggle('active', a);
-  if(miniLoop) miniLoop.classList.toggle('active', a);
-  audio.loop = a;
-  try{ if(mLoop) mLoop.setAttribute('aria-pressed', a? 'true':'false'); if(miniLoop) miniLoop.setAttribute('aria-pressed', a? 'true':'false'); }catch(e){}
-  try{ localStorage.setItem('gb:loop', a?'1':'0') }catch(e){}
-  // loop is handled by the <audio> element only while seamless mode is disabled
-  try{ audio.loop = a; }catch(e){}
-  // when disabling loop, stop any active WebAudio loop and transfer position back to the <audio> element
-  if(!a){
+function setAutoplayState(active){
+  isAutoplay = !!active;
+  // disabling autoplay forces off states that require autoplay
+  if(!isAutoplay){
+    if(isShuffling) setShuffleState(false);
+    if(loopMode === 'all') setLoopState('off');
+  }
+  const mAutoplay    = document.getElementById('mAutoplay');
+  const miniAutoplay = document.getElementById('miniAutoplay');
+  [mAutoplay, miniAutoplay].forEach(btn => {
+    if(!btn) return;
+    btn.classList.toggle('active', isAutoplay);
+    btn.setAttribute('aria-pressed', isAutoplay ? 'true' : 'false');
+    btn.title = isAutoplay ? 'Autoplay (on)' : 'Autoplay (off)';
+  });
+  try{ localStorage.setItem('gb:autoplay', isAutoplay ? '1' : '0'); }catch(e){}
+}
+function toggleAutoplay(){ setAutoplayState(!isAutoplay); }
+
+function isAutoplayEnabled(){
+  try{
+    const mAutoplayBtn = document.getElementById('mAutoplay');
+    const miniAutoplayBtn = document.getElementById('miniAutoplay');
+    const pressedStates = [mAutoplayBtn, miniAutoplayBtn]
+      .filter(Boolean)
+      .map(btn => btn.getAttribute('aria-pressed'));
+    if(pressedStates.includes('false')) return false;
+    if(pressedStates.includes('true')) return true;
+  }catch(e){}
+  return !!isAutoplay;
+}
+
+function _updateLoopUI(){
+  const isActive = loopMode !== 'off';
+  const isOne    = loopMode === 'one';
+  const titles   = { 'off': 'Loop (off)', 'one': 'Loop track (on)', 'all': 'Loop all tracks (on)' };
+  [mLoop, miniLoop].forEach(btn => {
+    if(!btn) return;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    btn.setAttribute('data-loop', loopMode);
+    btn.title = titles[loopMode] || 'Loop';
+    const badge = btn.querySelector('.loop-one-badge');
+    if(badge) badge.style.display = isOne ? 'flex' : 'none';
+  });
+}
+
+function setLoopState(mode){
+  // Accept legacy boolean calls from restore
+  if(mode === true)  mode = 'one';
+  if(mode === false) mode = 'off';
+  if(mode !== 'off' && mode !== 'one' && mode !== 'all') mode = 'off';
+
+  const wasOne = loopMode === 'one';
+  loopMode = mode;
+
+  // if enabling any loop, ensure shuffle is disabled
+  if(mode !== 'off'){ setShuffleState(false); }
+  // loop-all requires autoplay
+  if(mode === 'all' && !isAutoplay){ setAutoplayState(true); }
+
+  // audio.loop only true for loop-one (WebAudio gapless handles it; fallback too)
+  try{ audio.loop = (mode === 'one'); }catch(e){}
+
+  _updateLoopUI();
+  try{ localStorage.setItem('gb:loop', mode); }catch(e){}
+
+  // leaving loop-one: stop WebAudio and hand back to <audio>
+  if(wasOne && mode !== 'one'){
     try{
       if(webPlaying){
         const pos = getWebCurrentTime();
@@ -1509,34 +2451,30 @@ function setLoopState(active){
         try{ audio.currentTime = pos; }catch(e){}
         if(isPlaying){ try{ audio.play(); }catch(e){} }
       }
-    }catch(e){ }
+    }catch(e){}
   }
 
-  // when enabling loop during playback, try to decode and switch to WebAudio for gapless loop
-  if(a){
+  // entering loop-one during playback: switch to WebAudio for gapless
+  if(mode === 'one'){
     try{
       const t = tracks[index];
       if(!t) return;
       const file = t.file;
-      // if already running via WebAudio, nothing to do
       if(webPlaying && webFile === file) return;
-      // if audio is playing, attempt to switch immediately if decoded, otherwise decode in background then switch
       if(isPlaying){
         const cached = bufferCache.get(file);
         if(cached){
-          // switch immediately using current audio position
           try{
             const ok = switchToWebLoop(file, audio.currentTime || 0);
             if(ok){
               try{ mPlay.textContent='❚❚'; if(miniPlay) miniPlay.textContent='❚❚'; heroArt.classList.add('playing'); startProgress(); }catch(e){}
             }
-          }catch(e){ }
+          }catch(e){}
         } else {
-          // decode in background and switch when ready (only if still loop active and track unchanged)
           decodeFile(file).then(buf=>{
             try{
               const stillCurrent = tracks[index] && tracks[index].file === file;
-              if(buf && a && stillCurrent && isPlaying){
+              if(buf && loopMode === 'one' && stillCurrent && isPlaying){
                 try{ const ok = switchToWebLoop(file, audio.currentTime || 0); if(ok){ try{ startProgress(); }catch(e){} } }catch(e){}
               }
             }catch(e){}
@@ -1546,7 +2484,11 @@ function setLoopState(active){
     }catch(e){ console.warn('setLoopState: background web loop init failed', e); }
   }
 }
-function toggleLoop(){ setLoopState(!(mLoop && mLoop.classList.contains('active'))); }
+function toggleLoop(){
+  if(loopMode === 'off')       setLoopState('one');
+  else if(loopMode === 'one')  setLoopState('all');
+  else                         setLoopState('off');
+}
 
 function skip(dir){
   if(!tracks || !tracks.length) return;
@@ -1626,7 +2568,7 @@ function skip(dir){
       }
       
       // Now immediately start playback
-      const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+      const loopActive = loopMode === 'one';
       if(loopActive){
         // Use WebAudio for seamless loop
         switchToWebLoop(targetFile, 0);
@@ -1669,6 +2611,8 @@ function skip(dir){
 }
 
 function clearPlaybackToNoSong(){
+  if(_clearingNoSong) return;
+  _clearingNoSong = true;
   try{ stopProgress(); }catch(e){}
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
   try{ audio.pause(); }catch(e){}
@@ -1713,8 +2657,33 @@ function clearPlaybackToNoSong(){
     if(miniCover) miniCover.src = def;
     if(mCover) mCover.src = def;
     if(coverImg) coverImg.src = def;
+
+    // reset fullscreen timing labels so they don't keep stale song duration
+    if(mCur) mCur.textContent = '0:00';
+    if(mRem) mRem.textContent = '-0:00';
+    if(miniCur) miniCur.textContent = '0:00';
+    if(miniRem) miniRem.textContent = '0:00';
+
+    // clear fullscreen modal background layers from the previous track
+    if(modalBg){
+      try{ modalBg.style.backgroundImage = `url('${def}')`; }catch(e){}
+      try{ modalBg.style.opacity = 1; }catch(e){}
+    }
+    try{
+      const bg2 = document.getElementById('modalBg2');
+      if(bg2){
+        try{ if(_bg2PendingListener){ bg2.removeEventListener('transitionend', _bg2PendingListener); _bg2PendingListener = null; } }catch(e){}
+        try{ bg2.style.opacity = 0; }catch(e){}
+        try{ bg2.style.backgroundImage = 'none'; }catch(e){}
+      }
+    }catch(e){}
   }catch(e){}
   try{ setSeekPercent(0); }catch(e){}
+  try{ if(heroArt) heroArt.classList.remove('playing'); }catch(e){}
+  try{ if(mTrackCounter) mTrackCounter.textContent=''; if(miniTrackCounter) miniTrackCounter.textContent=''; }catch(e){}
+  try{ updateTrackActiveState(); }catch(e){}
+  try{ setSongQueryParam(null); }catch(e){}
+  _clearingNoSong = false;
 }
 
 audio.addEventListener('timeupdate',()=>{
@@ -1741,7 +2710,20 @@ audio.addEventListener('timeupdate',()=>{
 try{
   audio.addEventListener('seeking', ()=>{ _audioSeeking = true; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
   audio.addEventListener('seeked', ()=>{ _audioSeeking = false; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
-  audio.addEventListener('pause', ()=>{ try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = 0; }catch(e){} });
+  audio.addEventListener('pause', ()=>{
+    try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = 0; }catch(e){}
+    try{
+      // Fallback for browsers where ended sequencing is inconsistent:
+      // if media is ended and autoplay is off, force no-song reset.
+      const dur = Number(audio && audio.duration);
+      const cur = Number(audio && audio.currentTime);
+      const nearEnd = Number.isFinite(dur) && dur > 0 && Number.isFinite(cur) && cur >= Math.max(0, dur - 0.05);
+      const modalOpen = !!(modal && !modal.classList.contains('hidden'));
+      if(audio && (audio.ended || nearEnd) && !isAutoplayEnabled() && loopMode !== 'one' && !modalOpen){
+        clearPlaybackToNoSong();
+      }
+    }catch(e){}
+  });
   audio.addEventListener('playing', ()=>{ try{ _audioSeeking = false; _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
 }catch(e){}
 
@@ -1782,7 +2764,7 @@ mSeek.addEventListener('input',()=>{
   // If loop mode is enabled and we're currently paused (web loop not running),
   // update the saved WebAudio resume offset so Play resumes from the scrubbed position.
   try{
-    const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+    const loopActive = loopMode === 'one';
     const file = tracks[index] && tracks[index].file;
     if(loopActive && file){
       const buf = bufferCache.get(file);
@@ -1815,7 +2797,7 @@ if(miniSeek){
     }catch(e){}
     // If loop mode is enabled and we're paused (web loop not running), keep the resume offset in sync.
     try{
-      const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+      const loopActive = loopMode === 'one';
       const file = tracks[index] && tracks[index].file;
       if(loopActive && file){
         const buf = bufferCache.get(file);
@@ -1845,8 +2827,23 @@ if(mVolume){
 if(mVolume){ mVolume.addEventListener('input',()=>{ try{ localStorage.setItem('gb:volume', String(mVolume.value)) }catch(e){} }); }
 
 audio.addEventListener('ended',()=>{
-  if(mLoop && mLoop.classList.contains('active')){audio.currentTime=0;play();return}
-  stopProgress();
+  if(loopMode === 'one'){audio.currentTime=0;play();return}
+  try{ stopProgress(); }catch(e){}
+  // If autoplay is disabled, stop after the current track
+  if(!isAutoplayEnabled()){
+    const modalOpen = !!(modal && !modal.classList.contains('hidden'));
+    if(modalOpen){
+      // In fullscreen, keep current track UI visible; just stop playback state.
+      isPlaying = false;
+      try{ if(mPlay) mPlay.textContent = '▶'; if(miniPlay) miniPlay.textContent = '▶'; }catch(e){}
+      try{ if(heroArt) heroArt.classList.remove('playing'); }catch(e){}
+      try{ updateTrackActiveState(); }catch(e){}
+      try{ updateMediaSessionPlaybackState(); }catch(e){}
+      return;
+    }
+    try{ clearPlaybackToNoSong(); }catch(e){}
+    return;
+  }
   // If shuffle is enabled, consume the shuffleQueue for automatic transitions
   if(isShuffling){
     try{
@@ -1878,6 +2875,17 @@ audio.addEventListener('ended',()=>{
   try{
     const atLast = (typeof tracks !== 'undefined' && tracks && (index === tracks.length - 1));
     if(atLast && !isShuffling){
+      if(loopMode === 'all'){
+        // wrap back to first track
+        index = 0;
+        if(!modal.classList.contains('hidden')){
+          loadTrack(index, {fade:'cross'});
+        } else {
+          loadTrack(index, {fade:'in'});
+        }
+        play();
+        return;
+      }
       clearPlaybackToNoSong();
       try{ closeModal(); }catch(e){}
       return;
@@ -1892,6 +2900,11 @@ if(miniShuffle) miniShuffle.addEventListener('click',()=>{ toggleShuffle(); });
 
 if(mLoop) mLoop.addEventListener('click',()=>{ toggleLoop(); });
 if(miniLoop) miniLoop.addEventListener('click',()=>{ toggleLoop(); });
+
+const mAutoplay    = document.getElementById('mAutoplay');
+const miniAutoplay = document.getElementById('miniAutoplay');
+if(mAutoplay)    mAutoplay.addEventListener('click',   ()=>{ toggleAutoplay(); });
+if(miniAutoplay) miniAutoplay.addEventListener('click',()=>{ toggleAutoplay(); });
 
 // mini player wiring: only the buttons toggle playback; clicking cover/title opens modal
 if(miniPlay){miniPlay.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniPlayer && miniPlayer.classList.contains('no-song')){ return; } }catch(e){} isPlaying?pause():play();});}
@@ -2001,7 +3014,7 @@ document.addEventListener('keydown',(e)=>{
     e.preventDefault();
     try{
       const file = tracks[index] && tracks[index].file;
-      const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+      const loopActive = loopMode === 'one';
       const buf = (loopActive && file) ? bufferCache.get(file) : null;
       const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
       const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
@@ -2050,7 +3063,7 @@ document.addEventListener('keydown',(e)=>{
     e.preventDefault();
     try{
       const file = tracks[index] && tracks[index].file;
-      const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+      const loopActive = loopMode === 'one';
       const buf = (loopActive && file) ? bufferCache.get(file) : null;
       const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
       const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
@@ -2133,7 +3146,14 @@ function openModal(i){
       }
     } else {
       // fade in existing background
-      if(modalBg){ try{ modalBg.style.transition='opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){}; setTimeout(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} }, 30); }
+      if(modalBg){
+        if(isReducedAnimations){
+          try{ modalBg.style.transition='none'; modalBg.style.opacity = 1 }catch(e){}
+        }else{
+          try{ modalBg.style.transition='opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){};
+          setTimeout(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} }, 30);
+        }
+      }
       mPlay.textContent = isPlaying ? '❚❚' : '▶';
     }
   } else {
@@ -2191,6 +3211,80 @@ let analyser = null;
 let audioSource = null;
 let waveformAnimationId = null;
 let waveformColors = ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
+let spectrumParticles = [];
+const PARTICLE_MAX = 60;
+
+// Beat-reactive hero art pulse
+let beatRaf = null;
+let beatEnergy = 0;
+let _beatDataArray = null;
+
+function startBeatPulse(){
+  if(isReducedAnimations || isLiteMode){
+    try{ stopBeatPulse(); }catch(e){}
+    return;
+  }
+  if(beatRaf) return;
+  try{ initAudioContext(); }catch(e){}
+  if(!analyser) return;
+  if(!_beatDataArray || _beatDataArray.length !== analyser.frequencyBinCount){
+    _beatDataArray = new Uint8Array(analyser.frequencyBinCount);
+  }
+  if(heroArt) heroArt.style.transition = 'none';
+  if(miniCover) miniCover.style.transition = 'none';
+  if(mCover) mCover.style.transition = 'none';
+  const tick = ()=>{
+    beatRaf = requestAnimationFrame(tick);
+    if(!analyser){ stopBeatPulse(); return; }
+    analyser.getByteFrequencyData(_beatDataArray);
+    // Focus on kick-drum range (~50-130 Hz).
+    // With fftSize=4096 @ 44100 Hz, each bin ≈ 10.8 Hz → bins 5-12.
+    const kickStart = 5, kickEnd = 12;
+    let sum = 0;
+    for(let i = kickStart; i <= kickEnd; i++) sum += _beatDataArray[i];
+    const raw = (sum / (kickEnd - kickStart + 1)) / 255;
+    // Noise gate: ignore anything below 40% — only hard transient hits register
+    const gated = Math.max(0, raw - 0.40) / 0.60;
+    // Punchy attack, moderate release
+    beatEnergy = gated > beatEnergy
+      ? beatEnergy * 0.30 + gated * 0.70
+      : beatEnergy * 0.88 + gated * 0.12;
+    const scale = 0.93 + beatEnergy * 0.22;
+    const glow  = Math.round(beatEnergy * 38);
+    const alpha = (beatEnergy * 0.70).toFixed(3);
+    const shadow = `0 8px ${30 + glow}px rgba(0,0,0,0.6), 0 0 ${glow}px rgba(255,77,126,${alpha})`;
+    const tf = `scale(${scale.toFixed(4)})`;
+    const modalScale = 0.96 + beatEnergy * 0.13;
+    const modalGlow  = Math.round(beatEnergy * 24);
+    const modalShadow = `0 8px ${26 + modalGlow}px rgba(0,0,0,0.58), 0 0 ${modalGlow}px rgba(255,77,126,${alpha})`;
+    const modalTf = `scale(${modalScale.toFixed(4)})`;
+    if(heroArt){ heroArt.style.transform = tf; heroArt.style.boxShadow = shadow; }
+    if(miniCover){ miniCover.style.transform = tf; miniCover.style.boxShadow = shadow; }
+    if(mCover){ mCover.style.transform = modalTf; mCover.style.boxShadow = modalShadow; }
+    // Active track card cover
+    try{
+      const activeCard = trackListEl && trackListEl.querySelector('.track.active');
+      const cardImg = activeCard && activeCard.querySelector('img');
+      if(cardImg){ cardImg.style.transition='none'; cardImg.style.transform=tf; cardImg.style.boxShadow=shadow; }
+    }catch(e){}
+  };
+  beatRaf = requestAnimationFrame(tick);
+}
+
+function stopBeatPulse(){
+  if(beatRaf){ cancelAnimationFrame(beatRaf); beatRaf = null; }
+  beatEnergy = 0;
+  try{
+    if(heroArt){ heroArt.style.transition = ''; heroArt.style.transform = ''; heroArt.style.boxShadow = ''; }
+    if(miniCover){ miniCover.style.transition = ''; miniCover.style.transform = ''; miniCover.style.boxShadow = ''; }
+    if(mCover){ mCover.style.transition = ''; mCover.style.transform = ''; mCover.style.boxShadow = ''; }
+    try{
+      const activeCard = trackListEl && trackListEl.querySelector('.track.active');
+      const cardImg = activeCard && activeCard.querySelector('img');
+      if(cardImg){ cardImg.style.transition = ''; cardImg.style.transform = ''; cardImg.style.boxShadow = ''; }
+    }catch(e){}
+  }catch(e){}
+}
 
 function extractColorsFromImage(img){
   try{
@@ -2338,6 +3432,50 @@ function drawWaveform(){
         ctx.roundRect(x, y, barWidth, barHeight, [radius, radius, 0, 0]);
         ctx.fill();
       }
+      // Spawn particles from tall bars
+      if(!isLiteMode && spectrumParticles.length < PARTICLE_MAX){
+        for(let i = 0; i < barCount; i += 4){
+          const dataIndex = Math.floor((i / barCount) * (bufferLength * 0.6));
+          const value = dataArray[dataIndex] / 255.0;
+          const scaledValue = Math.pow(value, 0.7);
+          const barHeight = scaledValue * canvas.height * 0.85;
+          if(barHeight > canvas.height * 0.22 && Math.random() < 0.12){
+            const bx = i * (barWidth + barSpacing) + barWidth / 2;
+            const by = canvas.height - barHeight;
+            const colorIndex = Math.floor(Math.random() * waveformColors.length);
+            spectrumParticles.push({
+              x: bx + (Math.random() - 0.5) * barWidth,
+              y: by,
+              vy: -(0.6 + Math.random() * 1.8),
+              vx: (Math.random() - 0.5) * 0.6,
+              size: 1.5 + Math.random() * 2,
+              opacity: 0.55 + Math.random() * 0.4,
+              color: waveformColors[colorIndex]
+            });
+          }
+        }
+      }
+      // Draw and update particles
+      if(!isLiteMode){
+        for(let p = spectrumParticles.length - 1; p >= 0; p--){
+          const part = spectrumParticles[p];
+          part.y += part.vy;
+          part.x += part.vx;
+          part.opacity -= 0.014;
+          if(part.opacity <= 0){ spectrumParticles.splice(p, 1); continue; }
+          ctx.globalAlpha = part.opacity;
+          ctx.fillStyle = part.color;
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = part.color;
+          ctx.beginPath();
+          ctx.arc(part.x, part.y, part.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }else if(spectrumParticles.length){
+        spectrumParticles = [];
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
     } else {
       // Waveform mode
       analyser.getByteTimeDomainData(dataArray);
@@ -2417,7 +3555,7 @@ function toggleWaveform(){
     }
     
     // If loop is active and playing, restart it to use the unified audioContext at current position
-    const loopActive = !!(mLoop && mLoop.classList.contains('active'));
+    const loopActive = loopMode === 'one';
     if(loopActive && webPlaying && index >= 0 && index < tracks.length){
       const file = tracks[index].file;
       const currentPos = getWebCurrentTime();
@@ -2453,6 +3591,7 @@ function toggleWaveform(){
         cancelAnimationFrame(waveformAnimationId);
         waveformAnimationId = null;
       }
+      spectrumParticles = [];
       
       // Remove top info
       const topInfo = waveformContainer.querySelector('.waveform-top-info');
@@ -2577,3 +3716,35 @@ try{
 }catch(e){}
 
 init();
+
+// Changelog toast — show once per version
+(function(){
+  const VERSION = '2.0.0';
+  const KEY = 'gb:changelog-seen';
+  let seen;
+  try { seen = localStorage.getItem(KEY); } catch(e) {}
+  if (seen === VERSION) return;
+
+  const toast   = document.getElementById('changelogToast');
+  const toggle  = document.getElementById('changelogToggle');
+  const closeBtn= document.getElementById('changelogClose');
+  const body    = document.getElementById('changelogBody');
+  if (!toast) return;
+
+  // Show after a short delay so the page settles
+  setTimeout(() => toast.classList.add('visible'), 1200);
+
+  toggle.addEventListener('click', () => {
+    const open = body.classList.toggle('open');
+    toggle.textContent = open ? 'Collapse' : "What's new";
+  });
+
+  function dismiss() {
+    toast.classList.add('dismissed');
+    toast.classList.remove('visible');
+    try { localStorage.setItem(KEY, VERSION); } catch(e) {}
+    setTimeout(() => toast.remove(), 320);
+  }
+
+  closeBtn.addEventListener('click', dismiss);
+})();
