@@ -83,11 +83,31 @@ const miniTrackCounter = document.getElementById('miniTrackCounter');
 const mVersionSwitcher = document.getElementById('mVersionSwitcher');
 const mVersionPrev = document.getElementById('mVersionPrev');
 const mVersionNext = document.getElementById('mVersionNext');
+const airportInfoWrap = document.getElementById('airportInfoWrap');
+const mAirportInfo = document.getElementById('mAirportInfo');
+const airportInfoPopover = document.getElementById('airportInfoPopover');
+const AIRPORT_INFO_BUTTON_HTML = mAirportInfo ? mAirportInfo.innerHTML : '';
+const AIRPORT_INFO_POPOVER_HTML = airportInfoPopover ? airportInfoPopover.innerHTML : '';
+const GB_DRUMS_INFO_POPOVER_HTML = '<strong class="airport-info-popover__title">Drums Track Notice</strong><p>This drums track was separated from the full song using MVSEP (AI stem separation). It is fan-made and <em>not</em> an official isolated drum stem from the original soundtrack. Artifacts, bleed, and missing details may be present.</p>';
 let contextMenuTrackIndex = -1;
 
 // Media Session (lock screen / OS media controls)
 const HAS_MEDIA_SESSION = (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
 let _lastMediaPositionUpdateMs = 0;
+
+// True only for real Safari (excludes Chrome/Edge/Android which also contain 'Safari' in UA)
+const _isSafari = /safari/i.test(navigator.userAgent) && !/chrome|chromium|crios|android/i.test(navigator.userAgent);
+
+// Resolve the right audio file path for the current browser.
+// Non-Safari: prefer OGG  (.mp3 → .ogg)
+// Safari:     prefer MP3  (.ogg → .mp3)
+function _audioFile(path){
+  if(!path) return path;
+  // Safari: music/X.ogg  →  music/mp3/X.mp3
+  if(_isSafari) return path.replace(/^(music\/)(.+)\.ogg($|\?)/i, '$1mp3/$2.mp3$3');
+  // Non-Safari: music/mp3/X.mp3  →  music/X.ogg  (no-op if already OGG)
+  return path.replace(/^(music\/)mp3\/(.+)\.mp3($|\?)/i, '$1$2.ogg$3');
+}
 
 function isIOS(){
   try{
@@ -131,7 +151,8 @@ function _iosFallbackToNativeLoop(){
     const pos = webPlaying ? getWebCurrentTime() : (audio.currentTime || 0);
     stopWebLoop();
     audio.muted = false;
-    audio.loop = (loopMode === 'one');
+    // Don't use native audio.loop when there's a custom loop-start; the 'ended' handler will seek correctly.
+    audio.loop = (loopMode === 'one') && (_getTrackLoopStart(tracks && tracks[index]) === 0);
     try{ audio.currentTime = pos; }catch(e){}
     audio.play().catch(()=>{});
   }catch(e){}
@@ -195,6 +216,11 @@ function setupIOSPauseOnBackground(){
 function getSongParamForTrack(t){
   try{
     if(!t) return null;
+    if(_isAirportTrack(t)){
+      const timeHint = (tracks && tracks[index] === t) ? _getMediaPosition() : 0;
+      const sec = _getAirportSectionByTime(timeHint);
+      if(sec) return `Airport-${sec.id}`;
+    }
     const stage = (t.stage ? String(t.stage).trim() : '');
     const side = (t.side ? String(t.side).trim() : '');
     if(!stage || !side) return null;
@@ -297,6 +323,17 @@ function findTrackIndexBySongParam(songParam){
     if(!songParam || !tracks || !tracks.length) return -1;
     const raw = String(songParam).trim();
     if(!raw) return -1;
+    pendingAirportSeekSeconds = null;
+
+    const airportSection = _getAirportSectionFromSongParam(raw);
+    if(airportSection){
+      pendingAirportSeekSeconds = airportSection.start;
+      for(let i=0;i<tracks.length;i++){
+        if(_isAirportTrack(tracks[i])) return i;
+      }
+      return -1;
+    }
+
     const dash = raw.lastIndexOf('-');
     if(dash <= 0 || dash >= raw.length - 1) return -1;
     const stage = raw.slice(0, dash).trim();
@@ -316,6 +353,315 @@ const FLOATING_SHIP_STAGE = 'Airship';
 const FLOATING_SHIP_SIDE_ORIGINAL = 'Original';
 const FLOATING_SHIP_SIDE_GAME = 'Game';
 const FLOATING_SHIP_SIDE_KEY = 'gb:floatingShipSide';
+const AIRPORT_STAGE = 'Airport';
+const AIRPORT_LOOP_START = 3.243; // intro ends here; looping skips back to this point
+const AIRPORT_SECTIONS = [
+  { id:'Section-A-1', start:0,       title:'Airport (Lounge)',     artist:'Mario Kart Band', cover:null },
+  { id:'Section-A-2', start:58.824,  title:'Airport (Prepare for Takeoff)',     artist:'Mario Kart Band', cover:null },
+  { id:'Section-B-1', start:114.486, title:'Airport (Airborne 1)',     artist:'Mario Kart Band', cover:'images/Airport-Flying.png' },
+  { id:'Section-B-2', start:170.099, title:'Airport (Airborne 2)', artist:'Mario Kart Band', cover:'images/Airport-Flying.png' },
+  { id:'Section-B-3', start:225.682, title:'Airport (Airborne 3)',   artist:'Mario Kart Band', cover:'images/Airport-Flying.png' },
+  { id:'Section-A-3', start:281.295, title:'Airport (Arrival)',      artist:'Mario Kart Band', cover:'images/Airport-Return.png' },
+  { id:'Section-A-4', start:336.879, title:'Airport (Ending)',              artist:'Mario Kart Band', cover:'images/Airport-Return.png' }
+];
+
+let activeAirportSectionId = '';
+let activeAirportSectionImage = '';
+let pendingAirportSeekSeconds = null;
+let _seekLockedHintTimer = null;
+
+function _isAirportTrack(t){
+  try{
+    if(!t) return false;
+    return String(t.stage || '').trim() === AIRPORT_STAGE;
+  }catch(e){ return false; }
+}
+
+function _isGbDaysNightsDrumsTrack(t){
+  try{
+    if(!t) return false;
+    const side = String(t.side || '').trim().toLowerCase();
+    if(side !== 'drums') return false;
+    const title = String(t.title || '').trim().toLowerCase();
+    return title === 'gang beasts days drums' || title === 'gang beasts nights drums';
+  }catch(e){ return false; }
+}
+
+// Returns the loop-back point in seconds for a track (0 = loop from start).
+function _getTrackLoopStart(t){
+  try{ return _isAirportTrack(t) ? AIRPORT_LOOP_START : 0; }catch(e){ return 0; }
+}
+
+function _isSeekLockedForCurrentTrack(){
+  // Seek lock removed — Airport timeline is interactive.
+  return false;
+}
+
+function _syncSeekUiToCurrentPosition(){
+  try{
+    const dur = _getMediaDuration();
+    if(!dur || !isFinite(dur)) return;
+    const cur = _getMediaPosition();
+    const p = Math.max(0, Math.min(100, (cur / dur) * 100));
+    if(mSeek) mSeek.value = p;
+    if(miniSeek) miniSeek.value = p;
+    setSeekPercent(p);
+    if(mCur) mCur.textContent = fmt(cur);
+    if(miniCur) miniCur.textContent = fmt(cur);
+  }catch(e){}
+}
+
+function _showSeekLockedHint(){
+  try{
+    if(document.body && document.body.classList.contains('preloading')) return;
+    showPreloadToast('Seeking is disabled for Airport sections.', { spinner: false });
+    if(_seekLockedHintTimer) clearTimeout(_seekLockedHintTimer);
+    _seekLockedHintTimer = setTimeout(()=>{ try{ hidePreloadToast(); }catch(e){} }, 1100);
+  }catch(e){}
+}
+
+function _getAirportSectionIndexById(id){
+  try{
+    const key = String(id || '').trim().toLowerCase();
+    for(let i=0;i<AIRPORT_SECTIONS.length;i++){
+      if(String(AIRPORT_SECTIONS[i].id || '').trim().toLowerCase() === key) return i;
+    }
+    return 0;
+  }catch(e){ return 0; }
+}
+
+function _seekAirportSectionByDelta(delta){
+  try{
+    const t = (tracks && tracks[index]) ? tracks[index] : null;
+    if(!_isAirportTrack(t)) return false;
+    let currentIdx = _getAirportSectionIndexById(activeAirportSectionId);
+    if(currentIdx < 0 || currentIdx >= AIRPORT_SECTIONS.length){
+      const currentSection = _getAirportSectionForTrack(t, _getMediaPosition()) || AIRPORT_SECTIONS[0];
+      currentIdx = _getAirportSectionIndexById(currentSection && currentSection.id);
+    }
+    const targetIdx = Math.max(0, Math.min(AIRPORT_SECTIONS.length - 1, currentIdx + (delta > 0 ? 1 : -1)));
+    if(targetIdx === currentIdx) return true;
+    const target = AIRPORT_SECTIONS[targetIdx];
+    if(!target) return true;
+    _applyAirportSectionState(target.start, { force: true, sectionId: target.id, crossfade: true, waveformFade: false });
+    _seekToSeconds(target.start, { skipAirportApply: true });
+    return true;
+  }catch(e){ return false; }
+}
+
+function _getAirportSectionById(id){
+  try{
+    const raw = String(id || '').trim().toLowerCase();
+    if(!raw) return null;
+    for(const section of AIRPORT_SECTIONS){
+      if(String(section.id || '').trim().toLowerCase() === raw) return section;
+    }
+    return null;
+  }catch(e){ return null; }
+}
+
+function _updateSeekChapters(t){
+  try{
+    const mChapters    = document.getElementById('mSeekChapters');
+    const miniChapters = document.getElementById('miniSeekChapters');
+    const targets = [mChapters, miniChapters].filter(Boolean);
+    if(!_isAirportTrack(t) || !t.duration){
+      targets.forEach(el => { el.innerHTML = ''; });
+      return;
+    }
+    const dur = t.duration;
+    // Skip section index 0 (start of track — no marker needed at position 0%)
+    const html = AIRPORT_SECTIONS
+      .filter(s => s.start > 0)
+      .map(s => {
+        const pct = ((s.start / dur) * 100).toFixed(4);
+        return `<div class="seek-chapter-pip" style="left:${pct}%" title="${s.title}"></div>`;
+      }).join('');
+    targets.forEach(el => { el.innerHTML = html; });
+  }catch(e){}
+}
+
+function _getAirportSectionFromSongParam(songParam){
+  try{
+    const raw = String(songParam || '').trim();
+    if(!raw) return null;
+    const lower = raw.toLowerCase();
+    const prefix = 'airport-section-';
+    if(!lower.startsWith(prefix)) return null;
+    const id = `Section-${raw.slice(prefix.length)}`;
+    return _getAirportSectionById(id);
+  }catch(e){ return null; }
+}
+
+function _getAirportSectionByTime(seconds){
+  try{
+    const sec = (typeof seconds === 'number' && isFinite(seconds) && seconds >= 0) ? seconds : 0;
+    let cur = AIRPORT_SECTIONS[0] || null;
+    for(const section of AIRPORT_SECTIONS){
+      if(sec >= section.start) cur = section;
+      else break;
+    }
+    return cur;
+  }catch(e){ return AIRPORT_SECTIONS[0] || null; }
+}
+
+function _getAirportSectionForTrack(t, timeHint){
+  try{
+    if(!_isAirportTrack(t)) return null;
+    let sec = null;
+    if(typeof timeHint === 'number' && isFinite(timeHint)) sec = _getAirportSectionByTime(timeHint);
+    else if(tracks && tracks[index] === t) sec = _getAirportSectionByTime(_getMediaPosition());
+    else sec = _getAirportSectionByTime(0);
+    return sec;
+  }catch(e){ return null; }
+}
+
+function _applyTrackImageVisuals(imageSrc, crossfade=true){
+  try{
+    if(!imageSrc) return;
+    const src = encodeURI(imageSrc);
+    const useCrossfade = !!crossfade && !isReducedAnimations;
+    const setImgFade = (el, nextSrc, dur=220)=>{
+      if(!el) return;
+      if(!useCrossfade){
+        try{ el.style.transition = 'none'; el.style.opacity = 1; el.src = nextSrc; }catch(e){}
+        return;
+      }
+      try{ el.style.transition = `opacity ${dur}ms ease`; el.style.opacity = 0; }catch(e){}
+      const tmp = new Image();
+      tmp.onload = ()=>{ try{ el.src = nextSrc; requestAnimationFrame(()=>{ try{ el.style.opacity = 1; }catch(e){} }); }catch(e){} };
+      tmp.src = nextSrc;
+    };
+
+    setImgFade(coverImg, src, 240);
+    setImgFade(mCover, src, 260);
+    setImgFade(miniCover, src, 260);
+
+    if(modalBg){
+      if(!useCrossfade){
+        try{ modalBg.style.backgroundImage = `url('${src}')`; modalBg.style.opacity = 1; }catch(e){}
+      }else{
+        const bg2 = document.getElementById('modalBg2');
+        if(bg2){
+          try{ if(_bg2PendingListener){ bg2.removeEventListener('transitionend', _bg2PendingListener); _bg2PendingListener = null; } }catch(e){}
+          const img = new Image();
+          img.onload = ()=>{
+            try{ bg2.style.transition = 'opacity 260ms ease'; }catch(e){}
+            bg2.style.backgroundImage = `url('${src}')`;
+            requestAnimationFrame(()=>{ try{ bg2.style.opacity = 1; }catch(e){} });
+            const onEnd = (ev)=>{ if(ev.target !== bg2) return; try{ bg2.removeEventListener('transitionend', onEnd); _bg2PendingListener = null; modalBg.style.backgroundImage = bg2.style.backgroundImage; bg2.style.opacity = 0; }catch(e){} };
+            _bg2PendingListener = onEnd;
+            bg2.addEventListener('transitionend', onEnd);
+          };
+          img.src = src;
+        }else{
+          try{ modalBg.style.opacity = 0; }catch(e){}
+          setTimeout(()=>{ try{ modalBg.style.backgroundImage = `url('${src}')`; modalBg.style.opacity = 1; }catch(e){} }, 220);
+        }
+      }
+    }
+
+    if(waveformActive){
+      try{ updateWaveformInfo(src); }catch(e){}
+    }
+  }catch(e){}
+}
+
+function _applyAirportSectionState(timeHint, opts={}){
+  try{
+    const t = (tracks && tracks[index]) ? tracks[index] : null;
+    if(!_isAirportTrack(t)){
+      activeAirportSectionId = '';
+      activeAirportSectionImage = '';
+      return;
+    }
+    // If a specific section ID was provided (e.g. from an arrow click), use it
+    // directly without any time-based lookup that could resolve incorrectly.
+    const section = opts.sectionId
+      ? (AIRPORT_SECTIONS.find(s => s.id === opts.sectionId) || _getAirportSectionForTrack(t, timeHint))
+      : _getAirportSectionForTrack(t, timeHint);
+    if(!section) return;
+    const prevSectionId = activeAirportSectionId;
+    const changed = prevSectionId !== section.id;
+    const force = !!(opts && opts.force);
+    const waveformFade = !(opts && opts.waveformFade === false);
+    // During natural time-based progression, sections only ever advance forward.
+    // This prevents a brief position glitch (e.g. WebAudio's ~50ms start delay)
+    // from reverting the display back to a previous section.
+    if(!force && !opts.sectionId){
+      const newIdx = _getAirportSectionIndexById(section.id);
+      const curIdx = _getAirportSectionIndexById(prevSectionId);
+      if(curIdx >= 0 && newIdx < curIdx){
+        // Allow backward movement on a loop wrap (loop-one jumps back to the beginning).
+        // A wrap is unmistakable: position is near the loop-start and mode is loop-one.
+        const isLoopWrap = loopMode === 'one' && newIdx === 0 &&
+          typeof timeHint === 'number' && timeHint < AIRPORT_LOOP_START + 10;
+        if(!isLoopWrap) return;
+      }
+    }
+    if(!changed && !force) return;
+    activeAirportSectionId = section.id;
+
+    const title = section.title || _getDisplayTitle(t);
+    const artist = section.artist || (t.artist || '');
+    const image = section.cover || t.image;
+    const imageKey = String(image || '');
+    const imageChanged = imageKey !== activeAirportSectionImage;
+    activeAirportSectionImage = imageKey;
+
+    if(trackTitle) trackTitle.textContent = title;
+    if(mTitle) mTitle.textContent = title;
+    if(miniTitle) miniTitle.textContent = title;
+    if(trackArtist) trackArtist.textContent = artist;
+    if(mArtist) mArtist.textContent = artist;
+    if(miniArtist) miniArtist.textContent = artist;
+
+    if(imageChanged){
+      const allowCrossfade = !!(opts && opts.crossfade !== false);
+      try{ _applyTrackImageVisuals(image, allowCrossfade); }catch(e){}
+    }
+    if(waveformActive){
+      try{ updateWaveformInfo(encodeURI(image), { forceImageUpdate: imageChanged, forceContentUpdate: true, colorTransitionMs: 700, animateContent: waveformFade }); }catch(e){}
+    }
+
+    try{ setSongQueryParam(`Airport-${section.id}`); }catch(e){}
+    try{ updateMediaSessionMetadata(t); }catch(e){}
+    try{ updateMediaSessionPlaybackState(); }catch(e){}
+    try{ updateMediaSessionPosition(false); }catch(e){}
+    try{
+      const shareUrl = getSongShareUrlForTrack(t);
+      _setCopyButtonState(heroCopyLink, shareUrl);
+      _setCopyButtonState(miniCopyLink, shareUrl);
+      _setCopyButtonState(mCopyLink, shareUrl);
+    }catch(e){}
+    if(changed){
+      try{ renderList(); }catch(e){}
+      try{ updateTrackActiveState(); }catch(e){}
+      // Record a history entry for the section that just became active,
+      // but only while actually playing (not on initial load or paused seeks).
+      try{
+        if(isPlaying){
+          // Only commit after 4 seconds in the section (cancel any prior pending entry)
+          const _secEntry = {
+            title:    section.title  || t.title  || '',
+            artist:   section.artist || t.artist || '',
+            image:    section.cover  || t.image  || '',
+            duration: null,
+            stage:    t.stage || '',
+            side:     t.side  || ''
+          };
+          if(_historyPendingTimer) clearTimeout(_historyPendingTimer);
+          _historyPendingTimer = setTimeout(()=>{
+            _historyPendingTimer = null;
+            try{ recordHistoryEntry(_secEntry); }catch(e){}
+          }, 4000);
+        }
+      }catch(e){}
+    }
+    // Always refresh arrow enabled/disabled state after any section change.
+    try{ _updateFloatingShipVersionUI(index); }catch(e){}
+  }catch(e){}
+}
 
 function _normalizeFloatingSide(side){
   try{
@@ -346,8 +692,19 @@ function _isFloatingShipGameTrack(t){
 function _getDisplayTitle(t){
   try{
     if(!t) return '';
+    const airportSection = _getAirportSectionForTrack(t);
+    if(airportSection && airportSection.title) return airportSection.title;
     return String(t.title || '');
   }catch(e){ return String((t && t.title) || ''); }
+}
+
+function _getDisplayArtist(t){
+  try{
+    if(!t) return '';
+    const airportSection = _getAirportSectionForTrack(t);
+    if(airportSection && airportSection.artist) return airportSection.artist;
+    return String(t.artist || '');
+  }catch(e){ return String((t && t.artist) || ''); }
 }
 
 function _findFloatingShipTrackIndexBySide(side){
@@ -424,12 +781,46 @@ function _updateFloatingShipVersionUI(trackIndex){
   try{
     if(!mVersionSwitcher) return;
     const t = tracks[trackIndex];
-    const show = !!_isFloatingShipVariantTrack(t);
+    const isFloating = !!_isFloatingShipVariantTrack(t);
+    const isAirport = !!_isAirportTrack(t);
+    const isGbDrumsInfo = !!_isGbDaysNightsDrumsTrack(t);
+    const show = isFloating || isAirport;
     mVersionSwitcher.style.display = show ? '' : 'none';
-    if(show){
+    if(airportInfoWrap) airportInfoWrap.style.display = (isAirport || isGbDrumsInfo) ? '' : 'none';
+    if(mAirportInfo && airportInfoPopover){
+      if(isAirport){
+        mAirportInfo.classList.remove('airport-info-btn--text');
+        mAirportInfo.innerHTML = AIRPORT_INFO_BUTTON_HTML;
+        mAirportInfo.title = 'Audio attribution';
+        mAirportInfo.setAttribute('aria-label', 'Audio attribution info');
+        airportInfoPopover.innerHTML = AIRPORT_INFO_POPOVER_HTML;
+      }else if(isGbDrumsInfo){
+        mAirportInfo.classList.add('airport-info-btn--text');
+        mAirportInfo.textContent = 'Info';
+        mAirportInfo.title = 'Drums track info';
+        mAirportInfo.setAttribute('aria-label', 'Drums track information');
+        airportInfoPopover.innerHTML = GB_DRUMS_INFO_POPOVER_HTML;
+      }
+    }
+    if(!(isAirport || isGbDrumsInfo) && airportInfoPopover){
+      airportInfoPopover.setAttribute('aria-hidden', 'true');
+      if(mAirportInfo) mAirportInfo.setAttribute('aria-expanded', 'false');
+    }
+    if(isFloating){
       const side = _normalizeFloatingSide(t.side);
       if(mVersionPrev) mVersionPrev.disabled = (side === FLOATING_SHIP_SIDE_ORIGINAL);
       if(mVersionNext) mVersionNext.disabled = (side === FLOATING_SHIP_SIDE_GAME);
+      if(mVersionPrev){ mVersionPrev.title = 'Original version'; mVersionPrev.setAttribute('aria-label', 'Switch to Original version'); }
+      if(mVersionNext){ mVersionNext.title = 'Game version'; mVersionNext.setAttribute('aria-label', 'Switch to Game version'); }
+    } else if(isAirport){
+      const curId = activeAirportSectionId || (AIRPORT_SECTIONS[0] && AIRPORT_SECTIONS[0].id);
+      const secIdx = _getAirportSectionIndexById(curId);
+      if(mVersionPrev) mVersionPrev.disabled = secIdx <= 0;
+      if(mVersionNext) mVersionNext.disabled = secIdx >= (AIRPORT_SECTIONS.length - 1);
+      const prevLabel = secIdx > 0 ? AIRPORT_SECTIONS[secIdx - 1].id : 'Previous section';
+      const nextLabel = secIdx < AIRPORT_SECTIONS.length - 1 ? AIRPORT_SECTIONS[secIdx + 1].id : 'Next section';
+      if(mVersionPrev){ mVersionPrev.title = `Previous section (${prevLabel})`; mVersionPrev.setAttribute('aria-label', `Go to previous section (${prevLabel})`); }
+      if(mVersionNext){ mVersionNext.title = `Next section (${nextLabel})`; mVersionNext.setAttribute('aria-label', `Go to next section (${nextLabel})`); }
     }
   }catch(e){}
 }
@@ -461,14 +852,16 @@ function _applyFloatingShipVersion(nextSide){
 
 let _preloadToastTimer = null;
 
-function showPreloadToast(msg){
+function showPreloadToast(msg, opts={}){
   try{
     if(!preloadToast) return;
     if(_preloadToastTimer){ clearTimeout(_preloadToastTimer); _preloadToastTimer = null; }
+    const showSpinner = !(opts && opts.spinner === false);
     // small delay prevents flicker when decode/buffer is very fast
     _preloadToastTimer = setTimeout(()=>{
       try{
         if(msg && preloadToastText) preloadToastText.textContent = msg;
+        preloadToast.classList.toggle('preload-toast--no-spinner', !showSpinner);
         preloadToast.setAttribute('aria-hidden', 'false');
         preloadToast.classList.add('show');
       }catch(e){}
@@ -505,10 +898,13 @@ function updateMediaSessionMetadata(t){
       try{ navigator.mediaSession.metadata = null; }catch(e){}
       return;
     }
-    const art = t.image ? _absUrl(encodeURI(t.image)) : undefined;
+    const airportSection = _getAirportSectionForTrack(t);
+    const image = (airportSection && airportSection.cover) ? airportSection.cover : t.image;
+    const artist = _getDisplayArtist(t);
+    const art = image ? _absUrl(encodeURI(image)) : undefined;
     const data = {
       title: _getDisplayTitle(t),
-      artist: t.artist || '',
+      artist,
       album: 'Gang Beasts OST',
       artwork: art ? [
         { src: art, sizes: '96x96' },
@@ -545,8 +941,14 @@ function updateMediaSessionPosition(force=false){
   }catch(e){}
 }
 
-function _seekToSeconds(targetSeconds){
+function _seekToSeconds(targetSeconds, opts={}){
   try{
+    const allowLocked = !!(opts && opts.allowLocked);
+    if(_isSeekLockedForCurrentTrack() && !allowLocked){
+      try{ _showSeekLockedHint(); }catch(e){}
+      try{ _syncSeekUiToCurrentPosition(); }catch(e){}
+      return;
+    }
     const file = tracks[index] && tracks[index].file;
     const loopActive = loopMode === 'one';
     const buf = (loopActive && file) ? bufferCache.get(file) : null;
@@ -557,9 +959,9 @@ function _seekToSeconds(targetSeconds){
 
     if(loopActive && buf){
       if(isPlaying){
-        switchToWebLoop(file, (clamped % dur));
+        switchToWebLoop(file, clamped);
         // Sync audio.currentTime to the seek target so iOS scrubbing doesn't snap back.
-        try{ if(audio) audio.currentTime = clamped % dur; }catch(e){}
+        try{ if(audio) audio.currentTime = clamped; }catch(e){}
       } else {
         webOffset = clamped;
         webOffsetValid = true;
@@ -581,15 +983,21 @@ function _seekToSeconds(targetSeconds){
     }catch(e){}
     try{ _audioTimeBase = clamped; _audioTimeStamp = _nowMs(); }catch(e){}
     try{ updateMediaSessionPosition(true); }catch(e){}
+    // skipAirportApply is set when the caller has already applied section metadata
+    // (e.g. _seekAirportSectionByDelta), so we don't run a potentially stale time-lookup.
+    if(!(opts && opts.skipAirportApply)){
+      const waveInfoFade = !(opts && opts.suppressWaveformInfoFade);
+      try{ _applyAirportSectionState(clamped, {force:true, crossfade:true, waveformFade: waveInfoFade}); }catch(e){}
+    }
   }catch(e){}
 }
 
-function _seekBySeconds(delta){
+function _seekBySeconds(delta, opts={}){
   try{
     const duration = _getMediaDuration();
     if(!duration || !isFinite(duration)) return;
     const cur = _getMediaPosition();
-    _seekToSeconds((cur || 0) + delta);
+    _seekToSeconds((cur || 0) + delta, opts);
   }catch(e){}
 }
 
@@ -615,6 +1023,7 @@ function hidePreloadToast(){
     if(_preloadToastTimer){ clearTimeout(_preloadToastTimer); _preloadToastTimer = null; }
     if(!preloadToast) return;
     preloadToast.classList.remove('show');
+    preloadToast.classList.remove('preload-toast--no-spinner');
     preloadToast.setAttribute('aria-hidden', 'true');
   }catch(e){}
 }
@@ -655,6 +1064,7 @@ const CUSTOM_EXCLUSIONS_NAME_KEY = 'gb:customExclusionsName';
 const CUSTOM_FILTERS_KEY = 'gb:customFilters';
 const CUSTOM_FILTERS_ACTIVE_KEY = 'gb:customFiltersActive';
 let _historyRecordedForIndex = -1; // dedup: only record once per play() call per track
+let _historyPendingTimer = null;   // fires after 4s to commit a pending history entry
 let _loopHistoryLastTime = null;
 let _loopHistoryLastIndex = -1;
 
@@ -679,12 +1089,25 @@ function isTrackAllowedByViewFilter(t){
   try{
     if(!t) return false;
     const artist = (t.artist ? String(t.artist).trim() : '');
+    const side = (t.side ? String(t.side).trim().toLowerCase() : '');
+    const isDrums = side === 'drums';
     const fileKey = (t.file ? String(t.file).trim() : '');
+    // 'all' => default list excludes drum tracks
+    if(currentViewFilter === 'all'){
+      return !isDrums;
+    }
+    // custom maps (original behavior), still excluding drums from these views
     if(currentViewFilter === 'exclude'){
-      return artist === OFFICIAL_ARTIST;
+      return artist === OFFICIAL_ARTIST && !isDrums;
     }
     if(currentViewFilter === 'only'){
-      return artist !== OFFICIAL_ARTIST;
+      return artist !== OFFICIAL_ARTIST && !isDrums;
+    }
+    if(currentViewFilter === 'drums-include'){
+      return true;
+    }
+    if(currentViewFilter === 'drums-only'){
+      return isDrums;
     }
     if(currentViewFilter === 'custom'){
       if(!Array.isArray(customExclusionFiles) || customExclusionFiles.length === 0) return true;
@@ -1135,7 +1558,7 @@ function preloadNextTrack(){
     const nextIdx = computeNextIndexForAuto();
     if(nextIdx!==null && nextIdx!==undefined){
       nextPreloadedIndex = nextIdx;
-      const file = tracks[nextIdx] && tracks[nextIdx].file;
+      const file = tracks[nextIdx] ? _audioFile(tracks[nextIdx].file) : null;
       if(file && !bufferCache.has(file)){
         decodeFile(file).catch(()=>{});
       }
@@ -1147,7 +1570,7 @@ function preloadNextTrack(){
         (shuffleHistory && shuffleHistory.length ? shuffleHistory[shuffleHistory.length - 1] : null) : 
         findNextAllowedIndex(index, -1);
       if(prevIdx !== null && prevIdx !== undefined && prevIdx !== index){
-        const prevFile = tracks[prevIdx] && tracks[prevIdx].file;
+        const prevFile = tracks[prevIdx] ? _audioFile(tracks[prevIdx].file) : null;
         if(prevFile && !bufferCache.has(prevFile)){
           decodeFile(prevFile).catch(()=>{});
         }
@@ -1175,8 +1598,28 @@ function stopWebLoop(){
 function getWebCurrentTime(){
   try{
     if(webPlaying && webSource && webSource.buffer && audioCtx){
-      const dur = (webSource && webSource.buffer) ? webSource.buffer.duration : (loopScheduler.current && loopScheduler.current.buffer ? loopScheduler.current.buffer.duration : 0.000001);
-      const pos = (audioCtx.currentTime - webStartTime) % dur;
+      const buf = webSource.buffer;
+      const dur = buf.duration;
+      const virtualTime = audioCtx.currentTime - webStartTime;
+      // If a custom loop region was set (e.g. Airport intro skip), map virtual time to
+      // the real buffer position — accounting for the fact that the loop region is
+      // [loopStart, loopEnd] rather than [0, dur].
+      if(webSource.loop && webSource.loopStart > 0){
+        const ls = webSource.loopStart;
+        const le = (webSource.loopEnd > 0 && webSource.loopEnd <= dur) ? webSource.loopEnd : dur;
+        const loopLen = le - ls;
+        if(loopLen > 0){
+          if(virtualTime <= le){
+            // Still in the initial pass (includes the intro)
+            return Math.max(0, Math.min(virtualTime, le));
+          }
+          // We are somewhere in a repeated loop cycle
+          const loopElapsed = virtualTime - le;
+          return ls + (loopElapsed % loopLen);
+        }
+      }
+      // Default: position wraps uniformly across the full buffer
+      const pos = virtualTime % dur;
       return ((pos % dur) + dur) % dur;
     }
     return (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
@@ -1275,6 +1718,12 @@ function switchToWebLoop(file, offset=0){
     const src = audioCtx.createBufferSource();
     src.buffer = buf;
     src.loop = true;
+    // Custom loop start: skip the intro on tracks that define one.
+    const _loopStartSec = _getTrackLoopStart(tracks && tracks[index]);
+    if(_loopStartSec > 0){
+      src.loopStart = _loopStartSec;
+      src.loopEnd = buf.duration; // explicit end so loopStart is respected
+    }
     const gain = audioCtx.createGain();
     gain.gain.value = (audio && typeof audio.volume !== 'undefined') ? audio.volume : 1;
     
@@ -1483,7 +1932,7 @@ async function init(){
   // restore saved view filter (persisted across refreshes)
   try{
     const saved = localStorage.getItem('gb:viewFilter');
-    if(saved && (saved === 'all' || saved === 'exclude' || saved === 'only' || saved === 'custom')){
+    if(saved && (saved === 'all' || saved === 'exclude' || saved === 'only' || saved === 'drums-include' || saved === 'drums-only' || saved === 'custom')){
       currentViewFilter = saved;
       if(currentViewFilter === 'custom' && !isCustomFilterAvailable()) currentViewFilter = 'all';
       window.currentViewFilter = currentViewFilter;
@@ -1626,7 +2075,7 @@ async function init(){
     }
   }catch(e){}
 
-  // Global hotkeys: L = loop toggle, Shift+ArrowRight = next, Shift+ArrowLeft = prev, ? = show shortcuts
+  // Global hotkeys: L = loop toggle, Shift+ArrowRight = next, Shift+ArrowLeft = prev, Ctrl+Arrow = airport section, ? = show shortcuts
   try{
     // Setup keyboard hint toggle
     const toggleKeyboardHint = ()=>{
@@ -1862,13 +2311,38 @@ async function init(){
     if(mVersionPrev){
       mVersionPrev.addEventListener('click', (ev)=>{
         try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+        try{
+          const t = (tracks && tracks[index]) ? tracks[index] : null;
+          if(_isAirportTrack(t)){ _seekAirportSectionByDelta(-1); return; }
+        }catch(e){}
         _applyFloatingShipVersion(FLOATING_SHIP_SIDE_ORIGINAL);
       });
     }
     if(mVersionNext){
       mVersionNext.addEventListener('click', (ev)=>{
         try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+        try{
+          const t = (tracks && tracks[index]) ? tracks[index] : null;
+          if(_isAirportTrack(t)){ _seekAirportSectionByDelta(1); return; }
+        }catch(e){}
         _applyFloatingShipVersion(FLOATING_SHIP_SIDE_GAME);
+      });
+    }
+    // Airport info button toggle
+    if(mAirportInfo && airportInfoPopover){
+      mAirportInfo.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const open = airportInfoPopover.getAttribute('aria-hidden') === 'false';
+        airportInfoPopover.setAttribute('aria-hidden', open ? 'true' : 'false');
+        mAirportInfo.setAttribute('aria-expanded', open ? 'false' : 'true');
+      });
+      // Dismiss when clicking outside the popover
+      document.addEventListener('click', (ev)=>{
+        if(!airportInfoWrap || airportInfoWrap.contains(ev.target)) return;
+        if(airportInfoPopover.getAttribute('aria-hidden') === 'false'){
+          airportInfoPopover.setAttribute('aria-hidden', 'true');
+          mAirportInfo.setAttribute('aria-expanded', 'false');
+        }
       });
     }
     
@@ -1964,6 +2438,11 @@ async function init(){
           try{ toggleSettingsModal(false); ev.preventDefault(); }catch(e){}
           return;
         }
+        if(waveformActive){
+          // Consume Escape at the visualizer layer before modal close can run.
+          try{ toggleWaveform(); ev.preventDefault(); ev.stopImmediatePropagation(); }catch(e){}
+          return;
+        }
         if(modal && !modal.classList.contains('hidden')){
           try{ closeModal(); ev.preventDefault(); }catch(e){}
           return;
@@ -1984,6 +2463,18 @@ async function init(){
       }
       if(ev.key === 'ArrowLeft' && ev.shiftKey){
         try{ if(audio && audio.src) { skip(-1); ev.preventDefault(); } }catch(e){}
+      }
+      if(ev.key === 'ArrowRight' && ev.ctrlKey && !ev.shiftKey){
+        try{
+          const t = (tracks && tracks[index]) ? tracks[index] : null;
+          if(_isAirportTrack(t)){ _seekAirportSectionByDelta(1); ev.preventDefault(); }
+        }catch(e){}
+      }
+      if(ev.key === 'ArrowLeft' && ev.ctrlKey && !ev.shiftKey){
+        try{
+          const t = (tracks && tracks[index]) ? tracks[index] : null;
+          if(_isAirportTrack(t)){ _seekAirportSectionByDelta(-1); ev.preventDefault(); }
+        }catch(e){}
       }
     });
   }catch(e){}
@@ -2017,8 +2508,8 @@ async function init(){
       if(mNext) mNext.disabled = false;
       if(mShuffle) mShuffle.disabled = false;
       if(mLoop) mLoop.disabled = false;
-      if(mSeek) mSeek.disabled = false;
-      if(miniSeek) miniSeek.disabled = false;
+      if(mSeek) mSeek.disabled = _isSeekLockedForCurrentTrack();
+      if(miniSeek) miniSeek.disabled = _isSeekLockedForCurrentTrack();
       try{ document.body.classList.add('has-track'); }catch(e){}
     }
   }catch(e){}
@@ -2034,20 +2525,36 @@ function updateOSTDuration(){
   try{
     if(!ostDurationEl||!tracks||!tracks.length) return;
     const listedIndices = getListedTrackIndices();
-    const listedTracks = listedIndices.map((i)=>{
+    const effectiveIndices = listedIndices.map((i)=>{
       const base = tracks[i];
-      if(!base) return null;
+      if(!base) return -1;
       if(_isFloatingShipOriginalTrack(base)){
         const prefIndex = _findFloatingShipTrackIndexBySide(floatingShipPreferredSide);
-        if(prefIndex >= 0 && tracks[prefIndex]) return tracks[prefIndex];
+        if(prefIndex >= 0 && tracks[prefIndex]) return prefIndex;
       }
-      return base;
-    }).filter(Boolean);
-    const known=listedTracks.filter(t=>typeof t.duration==='number'&&t.duration>0);
-    if(!known.length) return;
-    const total=known.reduce((a,t)=>a+t.duration,0);
+      return i;
+    }).filter(i => i >= 0);
+
+    let total = 0;
+    let knownCount = 0;
+    effectiveIndices.forEach((i)=>{
+      const td = trackDurations && typeof trackDurations[i] === 'number' ? trackDurations[i] : 0;
+      const baked = tracks[i] && typeof tracks[i].duration === 'number' ? tracks[i].duration : 0;
+      const d = td > 0 ? td : (baked > 0 ? baked : 0);
+      if(d > 0){
+        total += d;
+        knownCount++;
+      }
+    });
+
+    if(!knownCount){
+      ostDurationEl.textContent = `-- \u00b7 ${effectiveIndices.length} tracks`;
+      ostDurationEl.style.opacity = '0.55';
+      return;
+    }
+
     if(total>0){
-      ostDurationEl.textContent=`${fmtTotal(total)} \u00b7 ${listedTracks.length} tracks`;
+      ostDurationEl.textContent=`${fmtTotal(total)} \u00b7 ${effectiveIndices.length} tracks`;
       ostDurationEl.style.opacity='0.75';
     }
   }catch(e){}
@@ -2205,7 +2712,7 @@ function preloadAllDurations(){
     if(trackDurations[i]){ durationLoadedCount++; if(nextIdx<tracks.length) loadOne(nextIdx++); return; }
     const a=new Audio();
     a.preload='metadata';
-    a.src=encodeURI(tracks[i].file);
+    a.src=encodeURI(_audioFile(tracks[i].file));
     const done=()=>{
       if(isFinite(a.duration)&&a.duration>0) trackDurations[i]=a.duration;
       try{
@@ -2256,7 +2763,7 @@ function renderList(){
 
     const el = document.createElement('button');
     el.className = 'track';
-    el.innerHTML = `<img src="${encodeURI(displayTrack.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${_getDisplayTitle(displayTrack)}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="sub">${displayTrack.artist||''}</div></div>`;
+    el.innerHTML = `<img src="${encodeURI(displayTrack.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${displayTrack.title}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="sub">${_getDisplayArtist(displayTrack)}</div></div>`;
     if(trackDurations[displayIndex]){
       const durEl=el.querySelector('.track-dur');
       if(durEl) durEl.classList.add('loaded');
@@ -2314,8 +2821,51 @@ function updateTrackActiveState(){
         else el.classList.remove('playing');
       } else {
         el.classList.remove('active','playing');
+        // Ensure any stale beat-pulse inline styles from a previously active card are cleared.
+        try{
+          const img = el.querySelector('img');
+          if(img){
+            img.style.transition = 'transform .24s ease, box-shadow .24s ease';
+            img.style.transform = '';
+            img.style.boxShadow = '';
+          }
+        }catch(e){}
       }
     });
+  }catch(e){}
+}
+
+function ensureActiveTrackVisible(opts={}){
+  try{
+    if(!trackListEl) return;
+    // Only auto-scroll in card view.
+    if(modal && !modal.classList.contains('hidden')) return;
+
+    const activeCard = trackListEl.querySelector('.track.active');
+    if(!activeCard) return;
+
+    const rect = activeCard.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    if(vh <= 0) return;
+
+    // Reserve space occupied by the mini player so cards hidden behind it count as out-of-view.
+    let miniOverlap = 0;
+    try{
+      if(miniPlayer && !miniPlayer.classList.contains('hidden')){
+        const m = miniPlayer.getBoundingClientRect();
+        if(m.height > 0 && m.top < vh) miniOverlap = Math.max(0, vh - m.top);
+      }
+    }catch(e){}
+
+    const visibleTop = 80;
+    const visibleBottom = Math.max(visibleTop + 40, vh - (20 + miniOverlap));
+    if(rect.top >= visibleTop && rect.bottom <= visibleBottom) return;
+
+    const smooth = !(opts && opts.smooth === false);
+    const targetTop = (rect.top < visibleTop)
+      ? (window.scrollY + rect.top - visibleTop)
+      : (window.scrollY + rect.bottom - visibleBottom);
+    window.scrollTo({ top: Math.max(0, targetTop), behavior: smooth ? 'smooth' : 'auto' });
   }catch(e){}
 }
 
@@ -2360,27 +2910,41 @@ function loadTrack(i, opts={fade:'cross'}){
   const resolvedIndex = _resolveTrackIndexForPlayback(i, opts);
   index = resolvedIndex;
   _historyRecordedForIndex = -1; // reset so next play() records this track fresh
+  // Cancel any pending history entry that hadn't reached the 4-second threshold
+  if(_historyPendingTimer){ clearTimeout(_historyPendingTimer); _historyPendingTimer = null; }
   _loopHistoryLastTime = null;
   _loopHistoryLastIndex = index;
   try{ updateTrackActiveState(); }catch(e){}
+  try{ requestAnimationFrame(()=>{ try{ ensureActiveTrackVisible({ smooth:true }); }catch(e){} }); }catch(e){}
   const t = tracks[index];
   try{ if(_isFloatingShipVariantTrack(t)) _setFloatingShipPreferredSide(t.side, true); }catch(e){}
   // stop any WebAudio playback when loading a new track to avoid overlap
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
   try{ audio.pause(); }catch(e){}
-  audio.src = encodeURI(t.file);
+  audio.src = encodeURI(_audioFile(t.file));
   // always start from the very beginning when loading a track
-  try{ audio.currentTime = 0; }catch(e){}
-  webOffset = 0; webOffsetValid = false;
+  let initialSeek = 0;
+  if(_isAirportTrack(t) && typeof pendingAirportSeekSeconds === 'number' && isFinite(pendingAirportSeekSeconds) && pendingAirportSeekSeconds >= 0){
+    initialSeek = pendingAirportSeekSeconds;
+  }
+  pendingAirportSeekSeconds = null;
+  try{ audio.currentTime = initialSeek; }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
+  webOffset = initialSeek;
+  webOffsetValid = initialSeek > 0;
   // do not pre-decode here to avoid blocking load; decoding happens when play is requested
   trackTitle.classList.add('track-title-main');
-  coverImg.src = encodeURI(t.image);
-  if(trackArtist) trackArtist.textContent = t.artist || '';
+  // For Airport tracks, resolve the correct cover for the initial seek position
+  // so all async image fades use the right image from the start.
+  const initialCoverImage = (_isAirportTrack(t) && initialSeek >= 0)
+    ? (() => { const sec = _getAirportSectionByTime(initialSeek); return (sec && sec.cover) ? sec.cover : t.image; })()
+    : t.image;
+  coverImg.src = encodeURI(initialCoverImage);
+  if(trackArtist) trackArtist.textContent = _getDisplayArtist(t);
   // update modal and mini UI with configurable fade
   const displayTitle = _getDisplayTitle(t);
   trackTitle.textContent = displayTitle;
   if(mTitle) mTitle.textContent = displayTitle;
-  if(mArtist) mArtist.textContent = t.artist||'';
+  if(mArtist) mArtist.textContent = _getDisplayArtist(t);
   const setImgFade = (el, src, dur=220)=>{
     if(!el) return;
     if(isReducedAnimations){
@@ -2396,16 +2960,16 @@ function loadTrack(i, opts={fade:'cross'}){
     if(modalBg){
       if(isReducedAnimations){
         try{ modalBg.style.transition = 'none'; }catch(e){}
-        modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+        modalBg.style.backgroundImage = `url('${encodeURI(initialCoverImage)}')`;
         try{ modalBg.style.opacity = 1; }catch(e){}
       }else{
         try{ modalBg.style.transition = 'opacity 320ms ease'; modalBg.style.opacity = 0 }catch(e){}
-        modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+        modalBg.style.backgroundImage = `url('${encodeURI(initialCoverImage)}')`;
         requestAnimationFrame(()=>{ try{ modalBg.style.opacity = 1 }catch(e){} });
       }
     }
-    setImgFade(mCover, encodeURI(t.image), 320);
-    setImgFade(miniCover, encodeURI(t.image), 320);
+    setImgFade(mCover, encodeURI(initialCoverImage), 320);
+    setImgFade(miniCover, encodeURI(initialCoverImage), 320);
   } else {
     // crossfade between existing background and new one using modalBg2 if present
     const bg2 = document.getElementById('modalBg2');
@@ -2416,7 +2980,7 @@ function loadTrack(i, opts={fade:'cross'}){
       const img = new Image();
       img.onload = ()=>{
         try{ bg2.style.transition = isReducedAnimations ? 'none' : 'opacity 260ms ease'; }catch(e){}
-        bg2.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+        bg2.style.backgroundImage = `url('${encodeURI(initialCoverImage)}')`;
         // force frame then fade in
         if(isReducedAnimations){
           try{ bg2.style.opacity = 1; }catch(e){}
@@ -2432,23 +2996,23 @@ function loadTrack(i, opts={fade:'cross'}){
           bg2.addEventListener('transitionend', onEnd);
         }
       };
-      img.src = t.image;
+      img.src = initialCoverImage;
     } else {
       if(modalBg){
         if(isReducedAnimations){
-          modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`;
+          modalBg.style.backgroundImage = `url('${encodeURI(initialCoverImage)}')`;
           try{ modalBg.style.opacity = 1; }catch(e){}
         }else{
           try{ modalBg.style.opacity = 0 }catch(e){};
-          setTimeout(()=>{ modalBg.style.backgroundImage = `url('${encodeURI(t.image)}')`; try{ modalBg.style.opacity = 1 }catch(e){} }, 220);
+          setTimeout(()=>{ modalBg.style.backgroundImage = `url('${encodeURI(initialCoverImage)}')`; try{ modalBg.style.opacity = 1 }catch(e){} }, 220);
         }
       }
     }
-    setImgFade(mCover, encodeURI(t.image));
-    setImgFade(miniCover, encodeURI(t.image));
+    setImgFade(mCover, encodeURI(initialCoverImage));
+    setImgFade(miniCover, encodeURI(initialCoverImage));
   }
   if(miniTitle) miniTitle.textContent = displayTitle;
-  if(miniArtist) miniArtist.textContent = t.artist||'';
+  if(miniArtist) miniArtist.textContent = _getDisplayArtist(t);
   try{ updateMediaSessionMetadata(t); }catch(e){}
   try{ updateMediaSessionPlaybackState(); }catch(e){}
   try{ updateMediaSessionPosition(true); }catch(e){}
@@ -2463,6 +3027,7 @@ function loadTrack(i, opts={fade:'cross'}){
   }catch(e){}
   // clear no-song state when a real track is loaded
   try{
+    const seekLocked = false; // seek is always enabled
     if(miniPlayer) miniPlayer.classList.remove('no-song');
     if(miniPrev) miniPrev.disabled = false;
     if(miniPlay) miniPlay.disabled = false;
@@ -2474,8 +3039,8 @@ function loadTrack(i, opts={fade:'cross'}){
     if(mNext) mNext.disabled = false;
     if(mShuffle) mShuffle.disabled = false;
     if(mLoop) mLoop.disabled = false;
-    if(mSeek) mSeek.disabled = false;
-    if(miniSeek) miniSeek.disabled = false;
+    if(mSeek) mSeek.disabled = seekLocked;
+    if(miniSeek) miniSeek.disabled = seekLocked;
   }catch(e){}
   // mark page as having a loaded track so CSS shows download buttons
   try{ document.body.classList.add('has-track'); }catch(e){}
@@ -2492,6 +3057,8 @@ function loadTrack(i, opts={fade:'cross'}){
   try{ preloadNextTrack(); }catch(e){}
   try{ updateTrackCounter(); }catch(e){}
   try{ _updateFloatingShipVersionUI(index); }catch(e){}
+  try{ _updateSeekChapters(t); }catch(e){}
+  try{ _applyAirportSectionState(initialSeek, {force:true, crossfade:false}); }catch(e){}
 }
 
 
@@ -2500,12 +3067,25 @@ async function play(){
   try{
     if(index !== _historyRecordedForIndex && tracks[index]){
       _historyRecordedForIndex = index;
-      recordHistoryEntry(tracks[index]);
+      const t = tracks[index];
+      // Build the entry now but only commit it after 4 seconds of actual listening
+      const buildEntry = () => {
+        if(_isAirportTrack(t) && activeAirportSectionId){
+          const sec = _getAirportSectionById(activeAirportSectionId);
+          if(sec) return { title: sec.title||t.title||'', artist: sec.artist||t.artist||'', image: sec.cover||t.image||'', duration: null, stage: t.stage||'', side: t.side||'' };
+        }
+        return t;
+      };
+      if(_historyPendingTimer) clearTimeout(_historyPendingTimer);
+      _historyPendingTimer = setTimeout(()=>{
+        _historyPendingTimer = null;
+        try{ recordHistoryEntry(buildEntry()); }catch(e){}
+      }, 4000);
     }
   }catch(e){}
   // if loop (gapless) mode enabled try to use WebAudio for seamless loop
   if(loopMode === 'one'){
-    const file = tracks[index] && tracks[index].file;
+    const file = tracks[index] ? _audioFile(tracks[index].file) : null;
     if(file){
       // iOS/iPadOS can suspend AudioContext when backgrounded; resume on user gesture.
       try{
@@ -2634,6 +3214,7 @@ function startProgress(){
       if(mRem) mRem.textContent = (isFinite(dur)? fmt(dur) : '');
       if(miniRem) miniRem.textContent = (isFinite(dur)? fmt(dur) : '');
       try{ updateMediaSessionPosition(false); }catch(e){}
+      try{ _applyAirportSectionState(cur, {force:false, crossfade:true}); }catch(e){}
     }
     progressRaf = requestAnimationFrame(step);
   };
@@ -2740,8 +3321,9 @@ function setLoopState(mode){
   // loop-all requires autoplay
   if(mode === 'all' && !isAutoplay){ setAutoplayState(true); }
 
-  // audio.loop only true for loop-one (WebAudio gapless handles it; fallback too)
-  try{ audio.loop = (mode === 'one'); }catch(e){}
+  // audio.loop only true for loop-one; skip native loop when a custom loop-start is defined
+  // (the 'ended' handler handles seeking to the right point in that case).
+  try{ audio.loop = (mode === 'one') && (_getTrackLoopStart(tracks && tracks[index]) === 0); }catch(e){}
 
   _updateLoopUI();
   try{ localStorage.setItem('gb:loop', mode); }catch(e){}
@@ -2763,7 +3345,7 @@ function setLoopState(mode){
     try{
       const t = tracks[index];
       if(!t) return;
-      const file = t.file;
+      const file = _audioFile(t.file);
       if(webPlaying && webFile === file) return;
       if(isPlaying){
         const cached = bufferCache.get(file);
@@ -2777,7 +3359,7 @@ function setLoopState(mode){
         } else {
           decodeFile(file).then(buf=>{
             try{
-              const stillCurrent = tracks[index] && tracks[index].file === file;
+              const stillCurrent = tracks[index] && _audioFile(tracks[index].file) === file;
               if(buf && loopMode === 'one' && stillCurrent && isPlaying){
                 try{ const ok = switchToWebLoop(file, audio.currentTime || 0); if(ok){ try{ startProgress(); }catch(e){} } }catch(e){}
               }
@@ -2987,6 +3569,8 @@ function clearPlaybackToNoSong(){
   try{ if(heroArt) heroArt.classList.remove('playing'); }catch(e){}
   try{ if(mTrackCounter) mTrackCounter.textContent=''; if(miniTrackCounter) miniTrackCounter.textContent=''; }catch(e){}
   try{ _updateFloatingShipVersionUI(-1); }catch(e){}
+  try{ activeAirportSectionId = ''; }catch(e){}
+  try{ activeAirportSectionImage = ''; }catch(e){}
   try{ updateTrackActiveState(); }catch(e){}
   try{ setSongQueryParam(null); }catch(e){}
   _clearingNoSong = false;
@@ -3009,6 +3593,7 @@ audio.addEventListener('timeupdate',()=>{
     if(mRem) mRem.textContent = (isFinite(dur) ? fmt(dur) : '');
     if(miniCur) miniCur.textContent = fmt(cur);
     if(miniRem) miniRem.textContent = (isFinite(dur) ? fmt(dur) : '');
+    try{ _applyAirportSectionState(cur, {force:false, crossfade:true}); }catch(e){}
   }
 });
 
@@ -3064,6 +3649,7 @@ mSeek.addEventListener('input',()=>{
       if(webPlaying && webSource && webSource.buffer){
         const newOffset = (percent/100) * webSource.buffer.duration;
         switchToWebLoop(tracks[index].file, newOffset);
+        try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
       return;
     }
   }catch(e){}
@@ -3081,13 +3667,18 @@ mSeek.addEventListener('input',()=>{
         webOffsetValid = true;
         try{ if(audio) audio.currentTime = newOffset; }catch(e){}
         try{ _audioTimeBase = newOffset; _audioTimeStamp = _nowMs(); }catch(e){}
+        try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
         return;
       }
     }
   }catch(e){}
   // using the audio element for seeking — clear any saved web offset so resume uses audio.currentTime
   webOffsetValid = false;
-  if(audio.duration){ audio.currentTime = (percent/100)*audio.duration }
+  if(audio.duration){
+    const newOffset = (percent/100)*audio.duration;
+    audio.currentTime = newOffset;
+    try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+  }
   try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
 });
 if(miniSeek){
@@ -3098,6 +3689,7 @@ if(miniSeek){
         if(webPlaying && webSource && webSource.buffer){
           const newOffset = (percent/100) * webSource.buffer.duration;
           switchToWebLoop(tracks[index].file, newOffset);
+          try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
         return;
       }
     }catch(e){}
@@ -3114,13 +3706,18 @@ if(miniSeek){
           webOffsetValid = true;
           try{ if(audio) audio.currentTime = newOffset; }catch(e){}
           try{ _audioTimeBase = newOffset; _audioTimeStamp = _nowMs(); }catch(e){}
+          try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
           return;
         }
       }
     }catch(e){}
     // clear cached web offset when seeking via audio element
     webOffsetValid = false;
-    if(audio.duration){ audio.currentTime = (percent/100)*audio.duration }
+    if(audio.duration){
+      const newOffset = (percent/100)*audio.duration;
+      audio.currentTime = newOffset;
+      try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+    }
     try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
   });
 }
@@ -3133,7 +3730,12 @@ if(mVolume){
 if(mVolume){ mVolume.addEventListener('input',()=>{ try{ localStorage.setItem('gb:volume', String(mVolume.value)) }catch(e){} }); }
 
 audio.addEventListener('ended',()=>{
-  if(loopMode === 'one'){audio.currentTime=0;play();return}
+  if(loopMode === 'one'){
+    const _ls = _getTrackLoopStart(tracks && tracks[index]);
+    try{ audio.currentTime = _ls || 0; }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
+    play();
+    return;
+  }
   try{ stopProgress(); }catch(e){}
   // If autoplay is disabled, stop after the current track
   if(!isAutoplayEnabled()){
@@ -3226,12 +3828,355 @@ if(miniArtist){miniArtist.addEventListener('click',(ev)=>{ev.stopPropagation(); 
 if(mDownload){ mDownload.addEventListener('click',(ev)=>{ ev.stopPropagation(); try{ if(!tracks || !tracks[index] || !tracks[index].file) return; downloadTrackAt(index); }catch(e){} }); }
 if(miniDownload){ miniDownload.addEventListener('click',(ev)=>{ ev.stopPropagation(); try{ if(!tracks || !tracks[index] || !tracks[index].file) return; downloadTrackAt(index); }catch(e){} }); }
 
+// Easter egg: 10 rapid cover clicks
+let _eggClickCount = 0;
+let _eggClickTimer = null;
+let _eggFindCount = 0;
+const _EGG_MESSAGES = [
+  { emoji:'👀', msg:'ok you found it.', sub:'cool.' },
+  { emoji:'🤨', msg:'still clicking?', sub:'there\'s nothing else here.' },
+  { emoji:'😐', msg:'what do you want from me', sub:'seriously.' },
+  { emoji:'😑', msg:'there is nothing here.', sub:'nothing.' },
+  { emoji:'😤', msg:'I\'m serious.', sub:'stop.' },
+  { emoji:'🍪', msg:'fine. have a cookie.', sub:'you happy now?' },
+  { emoji:'😒', msg:'...you ate the cookie didn\'t you', sub:'of course you did.' },
+  { emoji:'🎧', msg:'please just go listen to something', sub:'that\'s literally what this is for... oh wait, maybe you already are' },
+  { emoji:'🍖', msg:'ok i\'m calling boneloaf', sub:'i\'ll tell them to delay the next update.' },
+  { emoji:'🎵', msg:'...', sub:'...' },
+  { emoji:'🫵', msg:'YOU.', sub:'stop.' },
+];
+let _eggToastEl = null;
+let _eggToastTimer = null;
+let _whopperActive = false;
+function _showWhopper(){
+  try{
+    _whopperActive = true;
+    const W_IMG   = 'images/whopper.png';
+    const W_AUDIO = 'music/whopper.ogg'; // OGG primary; Safari swapped to .mp3 via _audioFile at load time
+    const W_TITLE = 'Whopper Whopper';
+    const W_ARTIST= 'Burger King';
+
+    // 1. Patch all track data so every future loadTrack/renderList call uses whopper values
+    if(tracks && tracks.length){
+      tracks.forEach(t=>{
+        if(!t) return;
+        t._origFile   = t._origFile   || t.file;
+        t._origImage  = t._origImage  || t.image;
+        t._origTitle  = t._origTitle  || t.title;
+        t._origArtist = t._origArtist || t.artist;
+        t._origStage  = t._origStage  !== undefined ? t._origStage  : t.stage;
+        t._origSide   = t._origSide   !== undefined ? t._origSide   : t.side;
+        t.file   = W_AUDIO;
+        t.image  = W_IMG;
+        t.title  = W_TITLE;
+        t.artist = W_ARTIST;
+        // Keep stage/side on floating-ship game variants so they stay hidden from the list;
+        // strip it from everything else to kill Airport sections + version-switcher behaviour.
+        const isGameVariant = (String(t._origStage||'').trim() === 'Airship') &&
+                              (String(t._origSide ||'').trim().toLowerCase() === 'game');
+        if(!isGameVariant){
+          t.stage = '';
+          t.side  = '';
+          if('loopStart' in t) t.loopStart = 0;
+          if('loopEnd'   in t) t.loopEnd   = 0;
+        }
+      });
+    }
+
+    // Hide the version-switcher UI (Airport / Floating Ship) permanently
+    try{ if(mVersionSwitcher) mVersionSwitcher.style.display = 'none'; }catch(e){}
+
+    // 2. Patch Airport sections so _getDisplayTitle/_getDisplayArtist return whopper values
+    try{
+      AIRPORT_SECTIONS.forEach(s=>{
+        if(!s) return;
+        s._origTitle  = s._origTitle  || s.title;
+        s._origArtist = s._origArtist || s.artist;
+        s._origCover  = s._origCover  || s.cover;
+        s.title  = W_TITLE;
+        s.artist = W_ARTIST;
+        s.cover  = W_IMG;
+      });
+    }catch(e){}
+
+    // 3. Override body::before background (the site's main blurred bg) via injected style
+    try{
+      const styleEl = document.createElement('style');
+      styleEl.id = 'whopper-bg-override';
+      styleEl.textContent = `body::before { background-image: url('${W_IMG}') !important; }`;
+      document.head.appendChild(styleEl);
+    }catch(e){}
+
+    // helper: skip SVG icons (shuffle, etc.)
+    const _isWIcon = s => !s || s.endsWith('.svg') || s.includes('.svg?') || s.startsWith('data:image/svg');
+
+    // 4. Slam every <img> on the page right now (skip SVG icons)
+    document.querySelectorAll('img').forEach(img=>{ if(!_isWIcon(img.getAttribute('src'))) img.src = W_IMG; });
+
+    // 5. Force modalBg background-image to whopper
+    try{
+      const bg1 = document.getElementById('modalBg');
+      const bg2 = document.getElementById('modalBg2');
+      if(bg1) bg1.style.backgroundImage = `url('${W_IMG}')`;
+      if(bg2) bg2.style.backgroundImage = `url('${W_IMG}')`;
+    }catch(e){}
+
+    // 6. Update all live text + cover UI elements
+    try{ if(trackTitle)  trackTitle.textContent  = W_TITLE;  }catch(e){}
+    try{ if(trackArtist) trackArtist.textContent = W_ARTIST; }catch(e){}
+    try{ if(mTitle)      mTitle.textContent      = W_TITLE;  }catch(e){}
+    try{ if(mArtist)     mArtist.textContent     = W_ARTIST; }catch(e){}
+    try{ if(miniTitle)   miniTitle.textContent   = W_TITLE;  }catch(e){}
+    try{ if(miniArtist)  miniArtist.textContent  = W_ARTIST; }catch(e){}
+
+    // 7. Re-render the track list immediately (images/names update now)
+    try{ renderList(); }catch(e){}
+
+    // 8. Load whopper.mp3's actual duration, then patch trackDurations + tracks[i].duration
+    //    and re-render so all per-track durations and the total OST duration reflect whopper
+    try{
+      const durProbe = new Audio();
+      durProbe.preload = 'metadata';
+      durProbe.addEventListener('loadedmetadata', ()=>{
+        try{
+          const wDur = isFinite(durProbe.duration) && durProbe.duration > 0 ? durProbe.duration : 0;
+          if(wDur > 0){
+            for(let i = 0; i < tracks.length; i++){
+              if(tracks[i]) tracks[i].duration = wDur;
+              trackDurations[i] = wDur;
+            }
+            try{ renderList(); }catch(e){}
+            try{ updateOSTDuration(); }catch(e){}
+          }
+        }catch(e){}
+      }, { once:true });
+      durProbe.src = _audioFile(W_AUDIO);
+    }catch(e){}
+
+    // 9. Reload + play current track as whopper audio
+    try{
+      const wasPlaying = !!isPlaying;
+      loadTrack(index, { fade:'cross' });
+      if(wasPlaying) setTimeout(()=>{ try{ play(); }catch(e){} }, 400);
+    }catch(e){}
+
+    // 9. MutationObserver: catch any img added or whose src gets changed later (skip SVG icons)
+    try{
+      const obs = new MutationObserver(muts=>{
+        muts.forEach(m=>{
+          // New nodes
+          m.addedNodes.forEach(n=>{
+            if(n.nodeName==='IMG' && !_isWIcon(n.getAttribute('src'))){ n.src = W_IMG; }
+            if(n.querySelectorAll) n.querySelectorAll('img').forEach(img=>{ if(!_isWIcon(img.getAttribute('src'))) img.src = W_IMG; });
+          });
+          // Src attribute changed back to something else
+          if(m.type==='attributes' && m.target && m.target.nodeName==='IMG'){
+            const cur = m.target.getAttribute('src');
+            if(!_isWIcon(cur) && cur !== W_IMG && !(cur||'').endsWith(W_IMG)){
+              m.target.src = W_IMG;
+            }
+          }
+        });
+      });
+      obs.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['src'] });
+    }catch(e){}
+  }catch(e){}
+}
+function _showEggVideo(opts){
+  // opts: { videoSrc, toastEmoji, toastMsg, toastSub, caption }
+  try{
+    const videoSrc   = opts.videoSrc;
+    const toastEmoji = opts.toastEmoji || '🚛';
+    const toastMsg   = opts.toastMsg   || '';
+    const toastSub   = opts.toastSub   || '';
+    const caption      = opts.caption      || '';
+    const captionAt    = (typeof opts.captionAt === 'number') ? opts.captionAt : 2;
+    // Pause music if playing
+    try{ if(isPlaying) pause(); }catch(e){}
+    // Bop the cover art
+    [coverImg, mCover].forEach(el=>{
+      if(!el) return;
+      el.classList.remove('cover-bop'); void el.offsetWidth; el.classList.add('cover-bop');
+      el.addEventListener('animationend', ()=> el.classList.remove('cover-bop'), { once:true });
+    });
+    // Dismiss any pending toast
+    if(_eggToastEl){ try{ document.body.removeChild(_eggToastEl); }catch(e){} _eggToastEl = null; }
+    if(_eggToastTimer){ clearTimeout(_eggToastTimer); _eggToastTimer = null; }
+    // Show the intro toast
+    const introEl = document.createElement('div');
+    introEl.className = 'egg-toast';
+    introEl.innerHTML = `<div class="egg-toast__emoji">${toastEmoji}</div><div class="egg-toast__msg">${toastMsg}</div><div class="egg-toast__sub">${toastSub}</div>`;
+    document.body.appendChild(introEl);
+    _eggToastEl = introEl;
+    // Halfway through the toast, enter fullscreen
+    setTimeout(()=>{
+      try{
+        const fsEl = document.documentElement;
+        if(fsEl.requestFullscreen) fsEl.requestFullscreen().catch(()=>{});
+        else if(fsEl.webkitRequestFullscreen) fsEl.webkitRequestFullscreen();
+      }catch(e){}
+    }, 900);
+    // After 1800ms dismiss toast and start cover expansion
+    setTimeout(()=>{
+      introEl.classList.add('closing');
+      setTimeout(()=>{ try{ document.body.removeChild(introEl); if(_eggToastEl===introEl) _eggToastEl=null; }catch(e){} }, 280);
+      // Find best cover element and snapshot its position
+      const coverEl = (mCover && mCover.getBoundingClientRect().width > 0) ? mCover : coverImg;
+      const rect = coverEl ? coverEl.getBoundingClientRect() : null;
+      // Create expanding cover panel that starts at the cover art and fills the screen
+      const blast = document.createElement('div');
+      if(rect && coverEl && coverEl.src){
+        blast.style.cssText = `position:fixed;z-index:9999;pointer-events:none;background:url('${coverEl.src}') center/cover no-repeat #000;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;border-radius:10px;transition:left 420ms cubic-bezier(0.4,0,0.2,1),top 420ms cubic-bezier(0.4,0,0.2,1),width 420ms cubic-bezier(0.4,0,0.2,1),height 420ms cubic-bezier(0.4,0,0.2,1),border-radius 420ms ease;`;
+      } else {
+        blast.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;background:#000;left:0;top:0;width:100vw;height:100vh;';
+      }
+      document.body.appendChild(blast);
+      // Force layout then animate to fullscreen
+      void blast.offsetWidth;
+      blast.style.left   = '0';
+      blast.style.top    = '0';
+      blast.style.width  = '100vw';
+      blast.style.height = '100vh';
+      blast.style.borderRadius = '0';
+      // After cover has finished expanding, fade in video
+      setTimeout(()=>{
+        const overlay = document.createElement('div');
+        overlay.className = 'egg-vid-overlay';
+        const vid = document.createElement('video');
+        vid.src = videoSrc;
+        vid.playsInline = true;
+        vid.autoplay = false;
+        const txt = document.createElement('div');
+        txt.className = 'egg-vid-overlay__text';
+        txt.textContent = caption;
+        overlay.appendChild(vid);
+        overlay.appendChild(txt);
+        document.body.appendChild(overlay);
+        // Fade in quickly then play
+        requestAnimationFrame(()=>requestAnimationFrame(()=>{
+          overlay.classList.add('visible');
+          vid.play().catch(()=>{});
+        }));
+        // Show caption at ~2 seconds in
+        let _hadText = false;
+        vid.addEventListener('timeupdate', ()=>{
+          if(!_hadText && vid.currentTime >= captionAt){ _hadText = true; txt.classList.add('visible'); }
+        });
+        // Fade out and clean up when video ends — NO click-to-dismiss
+        vid.addEventListener('ended', ()=>{
+          overlay.classList.remove('visible');
+          try{ document.body.removeChild(blast); }catch(e){}
+          setTimeout(()=>{ try{ document.body.removeChild(overlay); }catch(e){} }, 320);
+          try{
+            if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+            else if(document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+          }catch(e){}
+        });
+      }, 480);
+    }, 1800);
+  }catch(e){}
+}
+function _showEggToast(){
+  try{
+    const _EGG_VIDEOS = [
+      { videoSrc:'vids/torture 1.mp4', toastEmoji:'🚛', toastMsg:'alright',       toastSub:'you asked for it.',       caption:'HA! ya like that?',         captionAt:2  },
+      { videoSrc:'vids/torture 2.mp4', toastEmoji:'🚛', toastMsg:'seriously??',   toastSub:"you're pretty persistent", caption:'that oughtta do it',        captionAt:1  },
+      { videoSrc:'vids/torture 3.mp4', toastEmoji:'🚛', toastMsg:'dude really',   toastSub:'let me just',              caption:"how about THAT?",          captionAt:2  },
+      { videoSrc:'vids/torture 4.mp4', toastEmoji:'🚛', toastMsg:'still no??',    toastSub:'fine.',                    caption:'don\'t even think about it',   captionAt:2  },
+      { videoSrc:'vids/torture 5.mp4', toastEmoji:'🤏', toastMsg:'are you fr?',   toastSub:"that's the last straw",   caption:'',                           captionAt:99 },
+    ];
+    const videoThreshold = _EGG_MESSAGES.length; // 11
+    const whopperToastIdx = videoThreshold + _EGG_VIDEOS.length;     // 16
+    const whopperIdx      = videoThreshold + _EGG_VIDEOS.length + 1; // 17
+    if(_eggFindCount === whopperIdx){
+      // 18th: whopper mode — no toast, just chaos
+      _eggFindCount++;
+      _showWhopper();
+    } else if(_eggFindCount === whopperToastIdx){
+      // 17th: text toast only
+      _eggFindCount++;
+      if(_eggToastEl){ try{ document.body.removeChild(_eggToastEl); }catch(e){} _eggToastEl = null; }
+      if(_eggToastTimer){ clearTimeout(_eggToastTimer); _eggToastTimer = null; }
+      const el = document.createElement('div');
+      el.className = 'egg-toast';
+      el.innerHTML = '<div class="egg-toast__emoji">😵</div><div class="egg-toast__msg">dude</div><div class="egg-toast__sub">what else do you want me to do.</div>';
+      document.body.appendChild(el);
+      _eggToastEl = el;
+      [coverImg, mCover].forEach(img=>{
+        if(!img) return;
+        img.classList.remove('cover-bop'); void img.offsetWidth; img.classList.add('cover-bop');
+        img.addEventListener('animationend', ()=> img.classList.remove('cover-bop'), { once:true });
+      });
+      _eggToastTimer = setTimeout(()=>{
+        if(_eggToastEl === el){
+          el.classList.add('closing');
+          setTimeout(()=>{ try{ document.body.removeChild(el); if(_eggToastEl===el) _eggToastEl=null; }catch(e){} }, 280);
+        }
+        _eggToastTimer = null;
+      }, 2800);
+    } else if(_eggFindCount >= videoThreshold){
+      // Video phase — clamp to last video once all are exhausted
+      const vidIdx = Math.min(_eggFindCount - videoThreshold, _EGG_VIDEOS.length - 1);
+      _eggFindCount++;
+      _showEggVideo(_EGG_VIDEOS[vidIdx]);
+    } else {
+      // Text toast phase
+      const msg = _EGG_MESSAGES[_eggFindCount];
+      _eggFindCount++;
+      // bop the covers
+      [coverImg, mCover].forEach(el=>{
+        if(!el) return;
+        el.classList.remove('cover-bop');
+        void el.offsetWidth;
+        el.classList.add('cover-bop');
+        el.addEventListener('animationend', ()=> el.classList.remove('cover-bop'), { once:true });
+      });
+      // dismiss existing toast
+      if(_eggToastEl){ try{ document.body.removeChild(_eggToastEl); }catch(e){} _eggToastEl = null; }
+      if(_eggToastTimer){ clearTimeout(_eggToastTimer); _eggToastTimer = null; }
+      const el = document.createElement('div');
+      el.className = 'egg-toast';
+      el.innerHTML = `<div class="egg-toast__emoji">${msg.emoji}</div><div class="egg-toast__msg">${msg.msg}</div><div class="egg-toast__sub">${msg.sub}</div>`;
+      document.body.appendChild(el);
+      _eggToastEl = el;
+      _eggToastTimer = setTimeout(()=>{
+        if(_eggToastEl === el){
+          el.classList.add('closing');
+          setTimeout(()=>{ try{ document.body.removeChild(el); if(_eggToastEl===el) _eggToastEl=null; }catch(e){} }, 280);
+        }
+        _eggToastTimer = null;
+      }, 2800);
+    }
+  }catch(e){}
+}
+function _handleCoverEggClick(){
+  try{
+    // Don't count clicks while a toast or video is already showing
+    if(_eggToastEl) return;
+    if(document.querySelector('.egg-vid-overlay')) return;
+    _eggClickCount++;
+    if(_eggClickTimer) clearTimeout(_eggClickTimer);
+    _eggClickTimer = setTimeout(()=>{ _eggClickCount = 0; _eggClickTimer = null; }, 3000);
+    if(_eggClickCount >= 10){
+      _eggClickCount = 0;
+      clearTimeout(_eggClickTimer); _eggClickTimer = null;
+      _showEggToast();
+    }
+  }catch(e){}
+}
+
 // prevent hero cover being interactive when no track loaded
 if(coverImg){
   coverImg.addEventListener('click',(ev)=>{
     ev.stopPropagation();
+    _handleCoverEggClick();
     try{ if(!audio || !audio.src) return; }catch(e){ return; }
     openModal(index);
+  });
+}
+if(mCover){
+  mCover.addEventListener('click', ()=>{
+    _handleCoverEggClick();
   });
 }
 
@@ -3319,98 +4264,15 @@ document.addEventListener('keydown',(e)=>{
     return;
   }
   if(e.code === 'ArrowRight'){
+    if(e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
     e.preventDefault();
-    try{
-      const file = tracks[index] && tracks[index].file;
-      const loopActive = loopMode === 'one';
-      const buf = (loopActive && file) ? bufferCache.get(file) : null;
-      const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
-      const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
-      if(!dur || !isFinite(dur)) return;
-
-      let cur = 0;
-      if(webPlaying && webSource && webSource.buffer){
-        cur = getWebCurrentTime();
-      } else if(loopActive && webOffsetValid){
-        cur = webOffset;
-      } else {
-        cur = audio.currentTime || 0;
-      }
-
-      const next = Math.min(dur, (cur + 10));
-
-      if(loopActive && buf){
-        // If we're actively playing, seek by restarting the WebAudio loop.
-        if(isPlaying){
-          switchToWebLoop(file, (next % dur));
-        } else {
-          // paused: keep resume offset in sync
-          webOffset = next;
-          webOffsetValid = true;
-          try{ audio.currentTime = next; }catch(e){}
-        }
-      } else {
-        webOffsetValid = false;
-        try{ audio.currentTime = next; }catch(e){}
-      }
-
-      // keep UI in sync immediately when paused
-      try{
-        const p = (next / dur) * 100;
-        if(mSeek) mSeek.value = p;
-        if(miniSeek) miniSeek.value = p;
-        setSeekPercent(p);
-        if(mCur) mCur.textContent = fmt(next);
-        if(miniCur) miniCur.textContent = fmt(next);
-      }catch(e){}
-      try{ _audioTimeBase = next; _audioTimeStamp = _nowMs(); }catch(e){}
-    }catch(e){ try{ if(audio.duration) audio.currentTime = Math.min(audio.duration, (audio.currentTime||0) + 10); }catch(e){} }
+    try{ _seekBySeconds(10, { suppressWaveformInfoFade: true }); }catch(e){}
     return;
   }
   if(e.code === 'ArrowLeft'){
+    if(e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return;
     e.preventDefault();
-    try{
-      const file = tracks[index] && tracks[index].file;
-      const loopActive = loopMode === 'one';
-      const buf = (loopActive && file) ? bufferCache.get(file) : null;
-      const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
-      const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
-      if(!dur || !isFinite(dur)) return;
-
-      let cur = 0;
-      if(webPlaying && webSource && webSource.buffer){
-        cur = getWebCurrentTime();
-      } else if(loopActive && webOffsetValid){
-        cur = webOffset;
-      } else {
-        cur = audio.currentTime || 0;
-      }
-
-      const prev = Math.max(0, (cur - 10));
-
-      if(loopActive && buf){
-        if(isPlaying){
-          switchToWebLoop(file, (prev % dur));
-        } else {
-          webOffset = prev;
-          webOffsetValid = true;
-          try{ audio.currentTime = prev; }catch(e){}
-        }
-      } else {
-        webOffsetValid = false;
-        try{ audio.currentTime = prev; }catch(e){}
-      }
-
-      try{
-        const p = (prev / dur) * 100;
-        if(mSeek) mSeek.value = p;
-        if(miniSeek) miniSeek.value = p;
-        setSeekPercent(p);
-        if(mCur) mCur.textContent = fmt(prev);
-        if(miniCur) miniCur.textContent = fmt(prev);
-      }catch(e){}
-      try{ _audioTimeBase = prev; _audioTimeStamp = _nowMs(); }catch(e){}
-    }catch(e){ try{ if(audio.duration) audio.currentTime = Math.max(0, (audio.currentTime||0) - 10); }catch(e){} }
+    try{ _seekBySeconds(-10, { suppressWaveformInfoFade: true }); }catch(e){}
     return;
   }
   if(e.code === 'KeyV' || e.key === 'v' || e.key === 'V'){
@@ -3418,6 +4280,22 @@ document.addEventListener('keydown',(e)=>{
     // Only allow waveform toggle when modal is open
     if(mWaveform && !mWaveform.disabled && !modal.classList.contains('hidden')){
       toggleWaveform();
+    }
+    return;
+  }
+  if(e.code === 'KeyF' || e.key === 'f' || e.key === 'F'){
+    if(e.ctrlKey || e.metaKey || e.altKey){
+      return;
+    }
+    e.preventDefault();
+    if(waveformActive){
+      return;
+    }
+    // Toggle fullscreen modal for the current track.
+    if(modal.classList.contains('hidden')){
+      openModal(index, { autoplay: false });
+    }else{
+      closeModal();
     }
     return;
   }
@@ -3507,7 +4385,14 @@ function closeModal(){
   }
 }
 
-modalBack.addEventListener('click',closeModal);
+modalBack.addEventListener('click', ()=>{
+  // In visualizer mode, back exits the visualizer first.
+  if(waveformActive){
+    toggleWaveform();
+    return;
+  }
+  closeModal();
+});
 
 // Waveform visualization
 let waveformActive = false;
@@ -3520,8 +4405,83 @@ let audioSource = null;
 let audioSourceGain = null; // zero-gain node for audioSource; lets us silence the element's WebAudio path without audio.muted=true
 let waveformAnimationId = null;
 let waveformColors = ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
+let waveformColorsFrom = null;
+let waveformColorsTo = null;
+let waveformColorsTransitionStart = 0;
+let waveformColorsTransitionDuration = 650;
+let waveformLastInfoImage = '';
 let spectrumParticles = [];
 const PARTICLE_MAX = 60;
+
+function _parseRgbaColor(str){
+  try{
+    const m = String(str || '').match(/rgba?\(([^)]+)\)/i);
+    if(!m) return [255, 255, 255, 0.9];
+    const parts = m[1].split(',').map(x=>parseFloat(String(x).trim()));
+    const r = Math.max(0, Math.min(255, Math.round(parts[0] || 0)));
+    const g = Math.max(0, Math.min(255, Math.round(parts[1] || 0)));
+    const b = Math.max(0, Math.min(255, Math.round(parts[2] || 0)));
+    const a = (typeof parts[3] === 'number' && isFinite(parts[3])) ? Math.max(0, Math.min(1, parts[3])) : 0.9;
+    return [r, g, b, a];
+  }catch(e){ return [255, 255, 255, 0.9]; }
+}
+
+function _rgbaTupleToString(tuple){
+  try{
+    const r = Math.max(0, Math.min(255, Math.round(tuple[0] || 0)));
+    const g = Math.max(0, Math.min(255, Math.round(tuple[1] || 0)));
+    const b = Math.max(0, Math.min(255, Math.round(tuple[2] || 0)));
+    const a = (typeof tuple[3] === 'number' && isFinite(tuple[3])) ? Math.max(0, Math.min(1, tuple[3])) : 0.9;
+    return `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
+  }catch(e){ return 'rgba(255, 255, 255, 0.900)'; }
+}
+
+function _normalizeWaveformPalette(colors){
+  try{
+    let arr = Array.isArray(colors) ? colors.slice(0, 4).filter(Boolean) : [];
+    if(arr.length < 2){
+      arr = ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)'];
+    }
+    return arr;
+  }catch(e){ return ['rgba(255, 77, 126, 0.9)', 'rgba(255, 184, 107, 0.9)', 'rgba(126, 77, 255, 0.9)']; }
+}
+
+function _startWaveformColorsTransition(nextColors, durationMs=650){
+  try{
+    const next = _normalizeWaveformPalette(nextColors);
+    const prev = _normalizeWaveformPalette(waveformColors);
+    const maxLen = Math.max(prev.length, next.length);
+    waveformColorsFrom = Array.from({length:maxLen}, (_,i)=>prev[i] || prev[prev.length-1]);
+    waveformColorsTo = Array.from({length:maxLen}, (_,i)=>next[i] || next[next.length-1]);
+    waveformColorsTransitionStart = _nowMs();
+    waveformColorsTransitionDuration = Math.max(120, Number(durationMs) || 650);
+  }catch(e){ waveformColors = _normalizeWaveformPalette(nextColors); }
+}
+
+function _stepWaveformColorsTransition(){
+  try{
+    if(!waveformColorsFrom || !waveformColorsTo) return;
+    const elapsed = _nowMs() - waveformColorsTransitionStart;
+    const t = Math.max(0, Math.min(1, elapsed / waveformColorsTransitionDuration));
+    const mixed = [];
+    for(let i=0;i<waveformColorsTo.length;i++){
+      const a = _parseRgbaColor(waveformColorsFrom[i] || waveformColorsFrom[waveformColorsFrom.length - 1]);
+      const b = _parseRgbaColor(waveformColorsTo[i] || waveformColorsTo[waveformColorsTo.length - 1]);
+      mixed.push(_rgbaTupleToString([
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t
+      ]));
+    }
+    waveformColors = mixed;
+    if(t >= 1){
+      waveformColors = _normalizeWaveformPalette(waveformColorsTo);
+      waveformColorsFrom = null;
+      waveformColorsTo = null;
+    }
+  }catch(e){}
+}
 
 // Beat-reactive hero art pulse
 let beatRaf = null;
@@ -3585,12 +4545,16 @@ function stopBeatPulse(){
   beatEnergy = 0;
   try{
     if(heroArt){ heroArt.style.transition = ''; heroArt.style.transform = ''; heroArt.style.boxShadow = ''; }
-    if(miniCover){ miniCover.style.transition = ''; miniCover.style.transform = ''; miniCover.style.boxShadow = ''; }
-    if(mCover){ mCover.style.transition = ''; mCover.style.transform = ''; mCover.style.boxShadow = ''; }
+    if(miniCover){ miniCover.style.transition = 'transform .26s ease, box-shadow .26s ease, opacity .32s ease'; miniCover.style.transform = ''; miniCover.style.boxShadow = ''; }
+    if(mCover){ mCover.style.transition = 'transform .26s ease, box-shadow .26s ease, opacity .32s ease'; mCover.style.transform = ''; mCover.style.boxShadow = ''; }
     try{
-      const activeCard = trackListEl && trackListEl.querySelector('.track.active');
-      const cardImg = activeCard && activeCard.querySelector('img');
-      if(cardImg){ cardImg.style.transition = ''; cardImg.style.transform = ''; cardImg.style.boxShadow = ''; }
+      const cardImgs = trackListEl ? trackListEl.querySelectorAll('.track img') : [];
+      cardImgs.forEach(cardImg=>{
+        if(!cardImg) return;
+        cardImg.style.transition = 'transform .24s ease, box-shadow .24s ease';
+        cardImg.style.transform = '';
+        cardImg.style.boxShadow = '';
+      });
     }catch(e){}
   }catch(e){}
 }
@@ -3711,6 +4675,7 @@ function drawWaveform(){
   const draw = ()=>{
     if(!waveformAnimating) return;
     waveformAnimationId = requestAnimationFrame(draw);
+    try{ _stepWaveformColorsTransition(); }catch(e){}
     
     // Clear canvas completely
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -3935,22 +4900,29 @@ function toggleWaveform(){
   }
 }
 
-function updateWaveformInfo(imageSrc = null){
+function updateWaveformInfo(imageSrc = null, opts = {}){
   if(!waveformActive) return;
+  const forceImageUpdate = !!(opts && opts.forceImageUpdate);
+  const forceContentUpdate = !(opts && opts.forceContentUpdate === false);
+  const animateContent = !(opts && opts.animateContent === false);
+  const colorTransitionMs = (opts && typeof opts.colorTransitionMs === 'number') ? opts.colorTransitionMs : 650;
   
   // Use provided image source or fall back to mCover
   const imgSrc = imageSrc || (mCover && mCover.src);
   
   if(imgSrc){
+    const imageChanged = forceImageUpdate || !waveformLastInfoImage || waveformLastInfoImage !== String(imgSrc);
+    waveformLastInfoImage = String(imgSrc);
+    if(!imageChanged && !forceContentUpdate) return;
     // Preload the new image first
     const img = new Image();
     img.onload = ()=>{
-      waveformContainer.style.backgroundImage = `url(${imgSrc})`;
+      if(imageChanged) waveformContainer.style.backgroundImage = `url(${imgSrc})`;
       
       // Extract colors immediately after image loads
       const newColors = extractColorsFromImage(img);
       if(newColors && newColors.length >= 2){
-        waveformColors = newColors;
+        _startWaveformColorsTransition(newColors, colorTransitionMs);
       }
     };
     img.src = imgSrc;
@@ -3960,10 +4932,25 @@ function updateWaveformInfo(imageSrc = null){
   let topInfo = waveformContainer.querySelector('.waveform-top-info');
   
   if(topInfo){
-    // Crossfade existing content
+    // Update existing content only when it actually changed
     const coverEl = topInfo.querySelector('.waveform-top-info__cover');
     const titleEl = topInfo.querySelector('.waveform-top-info__title');
     const artistEl = topInfo.querySelector('.waveform-top-info__artist');
+    const nextCover = String(imgSrc || (mCover && mCover.src) || '');
+    const nextTitle = String((mTitle && mTitle.textContent) || '');
+    const nextArtist = String((mArtist && mArtist.textContent) || '');
+    const curCover = String((coverEl && coverEl.getAttribute('src')) || '');
+    const curTitle = String((titleEl && titleEl.textContent) || '');
+    const curArtist = String((artistEl && artistEl.textContent) || '');
+    const contentChanged = forceContentUpdate || forceImageUpdate || (nextCover !== curCover) || (nextTitle !== curTitle) || (nextArtist !== curArtist);
+    if(!contentChanged) return;
+
+    if(!animateContent){
+      if(coverEl && nextCover) coverEl.src = nextCover;
+      if(titleEl) titleEl.textContent = nextTitle;
+      if(artistEl) artistEl.textContent = nextArtist;
+      return;
+    }
     
     // Fade out
     if(coverEl) coverEl.style.opacity = '0';
@@ -3972,9 +4959,9 @@ function updateWaveformInfo(imageSrc = null){
     
     // Update content and fade back in after transition
     setTimeout(()=>{
-      if(coverEl) coverEl.src = imgSrc || mCover.src;
-      if(titleEl) titleEl.textContent = mTitle.textContent;
-      if(artistEl) artistEl.textContent = mArtist.textContent;
+      if(coverEl && nextCover) coverEl.src = nextCover;
+      if(titleEl) titleEl.textContent = nextTitle;
+      if(artistEl) artistEl.textContent = nextArtist;
       
       // Fade in
       requestAnimationFrame(()=>{
@@ -4024,14 +5011,6 @@ if(vizModeToggle && vizToggleLabel){
   });
 }
 
-// ESC key handler for waveform mode
-document.addEventListener('keydown', (e)=>{
-  if(e.key === 'Escape' && waveformActive){
-    e.preventDefault();
-    toggleWaveform();
-  }
-});
-
 // Persist scroll position: save periodically during scroll and on page hide/unload
 try{
   let _scrollSaveTimer = null;
@@ -4049,7 +5028,8 @@ init();
 
 // Changelog toast — show once per version
 (function(){
-  const VERSION = '2.0.0';
+  const badge = document.querySelector('#changelogToast .changelog-toast__badge');
+  const VERSION = (badge && badge.textContent ? badge.textContent.trim().replace(/^v/i, '') : '0');
   const KEY = 'gb:changelog-seen';
   let seen;
   try { seen = localStorage.getItem(KEY); } catch(e) {}
@@ -4064,8 +5044,41 @@ init();
   // Show after a short delay so the page settles
   setTimeout(() => toast.classList.add('visible'), 1200);
 
+  function getChangelogExpandedMaxHeight(){
+    return Math.min((window.innerHeight || 0) * 0.6, 420);
+  }
+
+  function shouldShowChangelogScrollbar(){
+    if(!body) return false;
+    return body.scrollHeight > (getChangelogExpandedMaxHeight() + 1);
+  }
+
+  function updateChangelogBodyScrollState(){
+    if(!body) return;
+    // Keep scrollbar behavior in sync with the current viewport max-height rule.
+    const canScroll = shouldShowChangelogScrollbar();
+    body.classList.toggle('can-scroll', canScroll);
+  }
+
+  body.addEventListener('transitionend', (ev) => {
+    if(ev.propertyName !== 'max-height') return;
+    updateChangelogBodyScrollState();
+  });
+
+  window.addEventListener('resize', () => {
+    updateChangelogBodyScrollState();
+  });
+
   toggle.addEventListener('click', () => {
-    const open = body.classList.toggle('open');
+    const opening = !body.classList.contains('open');
+    if(opening){
+      // Decide before expansion starts so long changelogs keep a visible scrollbar during animation.
+      body.classList.toggle('can-scroll', shouldShowChangelogScrollbar());
+      body.classList.add('open');
+    }else{
+      body.classList.remove('open');
+    }
+    const open = body.classList.contains('open');
     toggle.textContent = open ? 'Collapse' : "What's new";
   });
 

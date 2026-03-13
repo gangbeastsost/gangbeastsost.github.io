@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=0.9" />
   <title>Gang Beasts OST Player</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/appleicon.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -56,7 +57,9 @@
           <svg viewBox="0 0 12 8" width="12" height="8" aria-hidden="true" focusable="false"><path d="M1 1l5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
         </button>
         <div id="viewDropdown" class="view-dropdown" role="menu" aria-hidden="true">
-          <button class="dropdown-item" role="menuitem" data-value="all" aria-pressed="true">Show all tracks</button>
+          <button class="dropdown-item" role="menuitem" data-value="all" aria-pressed="true">All main tracks</button>
+          <button class="dropdown-item" role="menuitem" data-value="drums-include" aria-pressed="false">Include drum tracks</button>
+          <button class="dropdown-item" role="menuitem" data-value="drums-only" aria-pressed="false">Only drum tracks</button>
           <button class="dropdown-item" role="menuitem" data-value="exclude" aria-pressed="false">Exclude custom maps</button>
           <button class="dropdown-item" role="menuitem" data-value="only" aria-pressed="false">Only custom maps</button>
           <button id="customViewFilterItem" class="dropdown-item" role="menuitem" data-value="custom" aria-pressed="false" style="display:none">Custom exclusions</button>
@@ -144,7 +147,19 @@
         </div>
         <div class="keyboard-hint__item">
           <kbd>V</kbd>
-          <span>Toggle waveform</span>
+          <span>Toggle waveform visualizer</span>
+        </div>
+        <div class="keyboard-hint__item">
+          <kbd>F</kbd>
+          <span>Toggle fullscreen player</span>
+        </div>
+        <div class="keyboard-hint__item">
+          <kbd>Ctrl</kbd> + <kbd>→</kbd>
+          <span>Next section</span>
+        </div>
+        <div class="keyboard-hint__item">
+          <kbd>Ctrl</kbd> + <kbd>←</kbd>
+          <span>Previous section</span>
         </div>
         <div class="keyboard-hint__item">
           <kbd>?</kbd>
@@ -159,7 +174,7 @@
     <div class="keyboard-hint__inner">
       <h3>About This Player</h3>
       <div style="color:var(--muted);line-height:1.6;margin-bottom:24px;">
-        <p style="margin:0 0 12px">A web-based music player for the Gang Beasts Official Soundtrack, featuring tracks by <strong style="color:#fff">doseone & Bob Larder</strong> and custom fan-made modded maps.</p>
+        <p style="margin:0 0 12px">A web-based music player for the Gang Beasts Original Soundtrack, featuring tracks by <strong style="color:#fff">doseone & Bob Larder</strong> and custom fan-made modded maps.</p>
         <p style="margin:0 0 12px">This player supports gapless looping, shuffle mode, deep linking to specific tracks, and downloads.</p>
         <p style="margin:0 0 12px"><strong style="color:#fff">Sharing Tracks:</strong> Click the <svg viewBox="0 0 24 24" width="14" height="14" style="display:inline;vertical-align:middle;margin:0 2px"><path fill="currentColor" d="M16 1H6c-1.1 0-2 .9-2 2v12h2V3h10V1zm3 4H10c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16h-9V7h9v14z"/></svg> button next to any track title to copy a shareable link that embeds properly into Discord and opens directly to that song.</p>
         <p style="margin:0">Built with ❤️ by Minimack Studios & GitHub Copilot.</p>
@@ -308,7 +323,10 @@
     </div>
     <div class="mini-seek-wrap">
       <div class="mini-left"><span id="miniCur">0:00</span></div>
-          <input id="miniSeek" class="seek-common" type="range" min="0" max="100" value="0" step="0.001" aria-label="seek">
+          <div class="seek-wrap">
+            <input id="miniSeek" class="seek-common" type="range" min="0" max="100" value="0" step="0.001" aria-label="seek">
+            <div id="miniSeekChapters" class="seek-chapters"></div>
+          </div>
       <div class="mini-times"><span id="miniRem">0:00</span></div>
     </div>
   </footer>
@@ -327,14 +345,25 @@
       <div class="modal-info">
         <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
           <div style="display:flex;align-items:center;gap:4px;min-width:0;flex:1;">
-            <div class="m-title" id="mTitle">Title</div>
-            <button id="mCopyLink" class="copy-link-btn" title="Copy link" aria-label="Copy link" disabled>
-              <svg class="copy-link-btn__icon copy-link-btn__icon--copy" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M16 1H6c-1.1 0-2 .9-2 2v12h2V3h10V1zm3 4H10c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16h-9V7h9v14z"/></svg>
-              <svg class="copy-link-btn__icon copy-link-btn__icon--check" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
-            </button>
+            <div style="display:flex;align-items:center;gap:4px;flex:1;min-width:0;">
+              <div class="m-title" id="mTitle">Title</div>
+              <button id="mCopyLink" class="copy-link-btn" title="Copy link" aria-label="Copy link" disabled>
+                <svg class="copy-link-btn__icon copy-link-btn__icon--copy" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M16 1H6c-1.1 0-2 .9-2 2v12h2V3h10V1zm3 4H10c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h9c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16h-9V7h9v14z"/></svg>
+                <svg class="copy-link-btn__icon copy-link-btn__icon--check" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>
+              </button>
+            </div>
             <div id="mVersionSwitcher" class="m-version-switcher" style="display:none" aria-label="Switch Floating Ship Symphony version">
               <button id="mVersionPrev" class="m-version-arrow" type="button" title="Original version" aria-label="Switch to Original version">◀</button>
               <button id="mVersionNext" class="m-version-arrow" type="button" title="Game version" aria-label="Switch to Game version">▶</button>
+            </div>
+          </div>
+          <div id="airportInfoWrap" class="airport-info-wrap" style="display:none">
+            <button id="mAirportInfo" class="airport-info-btn" type="button" title="Audio attribution" aria-label="Audio attribution info" aria-expanded="false">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            </button>
+            <div id="airportInfoPopover" class="airport-info-popover" aria-hidden="true" role="note">
+              <strong class="airport-info-popover__title">Audio Attribution</strong>
+              <p>&ldquo;Airport&rdquo; is a fan-made arrangement of <em>Sunshine Airport</em>, originally composed for <em>Mario Kart 8</em> &copy; Nintendo, 2014. It was created by Minimack Studios as a custom modded map and is not part of any official Nintendo or Gang Beasts release. This arrangement incorporates musical elements from the <em>Mario Kart World</em> reimagining of the track. All underlying compositions and source material remain the intellectual property of Nintendo Co., Ltd. This site is not affiliated with Nintendo and asserts no ownership over any original works.</p>
             </div>
           </div>
           <button id="mDownload" class="m-download" title="Download" aria-label="Download track">
@@ -346,7 +375,10 @@
 
         <div class="m-progress">
           <div class="times"><span id="mCur">0:00</span><span id="mRem">-0:00</span></div>
-          <input id="mSeek" class="seek-common" type="range" min="0" max="100" value="0" step="0.001">
+          <div class="seek-wrap">
+            <input id="mSeek" class="seek-common" type="range" min="0" max="100" value="0" step="0.001">
+            <div id="mSeekChapters" class="seek-chapters"></div>
+          </div>
         </div>
 
         <div class="m-controls">
@@ -404,11 +436,11 @@
   </div>
   <div id="historyOverlay" class="history-overlay"></div>
 
-  <!-- Changelog toast (v2.0.0) -->
+  <!-- Changelog toast (v2.1.0) -->
   <div id="changelogToast" class="changelog-toast" aria-hidden="true">
     <div class="changelog-toast__header">
       <div class="changelog-toast__title">
-        <span class="changelog-toast__badge">v2.0.0</span>
+        <span class="changelog-toast__badge">v2.1.0</span>
         <span>Site Updated</span>
       </div>
       <div class="changelog-toast__actions">
@@ -418,19 +450,12 @@
     </div>
     <div class="changelog-toast__body" id="changelogBody">
       <ul class="changelog-toast__list">
-        <li><strong>Beat-reactive pulse</strong> — album art, mini player &amp; track cards pulse to the melody</li>
-        <li><strong>3-mode loop</strong> — click loop to cycle: loop track, loop all, or off</li>
-        <li><strong>Autoplay toggle</strong> — disable to stop after the current track; turns off shuffle &amp; loop-all</li>
-        <li><strong>Autoplay end behavior in fullscreen</strong> — when autoplay is off and a song ends, playback stops while keeping the current song UI visible</li>
-        <li><strong>OST duration label</strong> — total runtime shown next to search, respects view filter</li>
-        <li><strong>Inline track durations</strong> — hover a card to reveal its length</li>
-        <li><strong>Track X of Y counter</strong> — shown in the modal &amp; mini player</li>
-        <li><strong>Listen history</strong> — the History button tracks every song you play, with timestamps and a play-again button; persists across refreshes</li>
-        <li><strong>Settings modal</strong> — new dedicated settings panel with General and Custom Groups pages</li>
-        <li><strong>Reduce animations mode</strong> — disables pulsing/animation-heavy transitions for snappier behavior</li>
-        <li><strong>Lite mode</strong> — reduces heavier visual effects and disables spectrum particles for better performance</li>
-        <li><strong>Custom groups view filter</strong> — build your own blacklist/whitelist-track list and filter with a new View option</li>
-        <li><strong>UI polish</strong> — sharper typography, refined cards, richer blur effects</li>
+        <li><strong>OGG migration + Safari fallback</strong> — library now runs on OGG by default with automatic Safari MP3 fallback via music/mp3/</li>
+        <li><strong>Drums expansion</strong> — added 24 drums tracks and new drums view modes: <em>Include drum tracks</em> and <em>Only drum tracks</em></li>
+        <li><strong>Airport upgrade</strong> — Airport now uses it's fully new audio track that will be used in Airport 1.2.0, and has section-based playback, chapter markers, dedicated section share pages, and improved attribution info in the modal</li>
+        <li><strong>Smoother playback UX</strong> — active songs stay easier to follow with better auto-scroll and cleaner pulse transitions</li>
+        <li><strong>iPhone homescreen icon</strong> — adding the site to the homescreen will now display a custom icon</li>
+        <li><strong>Easter eggs</strong> — added some easter eggs. try to find out where they are! hint: you need to click on a certain place 10 times :)
       </ul>
     </div>
   </div>

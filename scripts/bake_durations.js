@@ -158,6 +158,69 @@ function getMp3Duration(buf) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure-Node OGG Vorbis duration parser
+// Reads the sample rate from the Vorbis ID header (first page) then scans
+// the tail of the file for the highest granule position.
+// ---------------------------------------------------------------------------
+
+function getOggDuration(buf) {
+  // Verify OGG capture pattern
+  if (buf.length < 27 ||
+      buf[0] !== 0x4F || buf[1] !== 0x67 ||
+      buf[2] !== 0x67 || buf[3] !== 0x53) return null;
+
+  // ── 1. Extract Vorbis sample rate from the identification header ──────────
+  let sampleRate = 0;
+  {
+    let pos = 0;
+    for (let attempt = 0; attempt < 8 && pos + 27 <= buf.length; attempt++) {
+      if (buf[pos]   !== 0x4F || buf[pos+1] !== 0x67 ||
+          buf[pos+2] !== 0x67 || buf[pos+3] !== 0x53) break;
+      const numSegs = buf[pos + 26];
+      if (pos + 27 + numSegs > buf.length) break;
+      let dataLen = 0;
+      for (let s = 0; s < numSegs; s++) dataLen += buf[pos + 27 + s];
+      const d = pos + 27 + numSegs; // start of first packet in page
+      // Vorbis ID header: type byte 0x01 + ascii "vorbis"
+      if (d + 16 <= buf.length &&
+          buf[d]   === 0x01 &&
+          buf[d+1] === 0x76 && buf[d+2] === 0x6F && buf[d+3] === 0x72 &&
+          buf[d+4] === 0x62 && buf[d+5] === 0x69 && buf[d+6] === 0x73) {
+        sampleRate = buf.readUInt32LE(d + 12); // after type(1)+"vorbis"(6)+version(4)+channels(1)
+        break;
+      }
+      pos = d + dataLen;
+    }
+  }
+  if (!sampleRate) return null;
+
+  // ── 2. Scan the tail for the highest valid granule position ───────────────
+  const tailStart = Math.max(0, buf.length - 65536);
+  let maxGranule = 0n;
+
+  for (let i = tailStart; i <= buf.length - 27; i++) {
+    if (buf[i]   !== 0x4F || buf[i+1] !== 0x67 ||
+        buf[i+2] !== 0x67 || buf[i+3] !== 0x53) continue;
+    if (buf[i + 4] !== 0) continue; // OGG version must be 0
+    const numSegs = buf[i + 26];
+    if (i + 27 + numSegs > buf.length) continue;
+    // Granule position: 64-bit little-endian at offset 6 in the page header
+    const lo = buf.readUInt32LE(i + 6);
+    const hi = buf.readUInt32LE(i + 10);
+    if (lo === 0xFFFFFFFF && hi === 0xFFFFFFFF) continue; // −1 sentinel = no position
+    const granule = (BigInt(hi) << 32n) | BigInt(lo >>> 0);
+    if (granule > maxGranule) maxGranule = granule;
+    // Skip to the next page to avoid false-matches inside packet data
+    let pageDataLen = 0;
+    for (let s = 0; s < numSegs; s++) pageDataLen += buf[i + 27 + s];
+    i += 27 + numSegs + pageDataLen - 1; // -1 because loop does i++
+  }
+
+  if (maxGranule === 0n) return null;
+  return Number(maxGranule) / sampleRate;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -187,7 +250,8 @@ async function main() {
 
     try {
       const buf = fs.readFileSync(filePath);
-      const dur = getMp3Duration(buf);
+      const ext = path.extname(t.file).toLowerCase();
+      const dur = (ext === '.ogg' || ext === '.oga') ? getOggDuration(buf) : getMp3Duration(buf);
 
       if (typeof dur === 'number' && isFinite(dur) && dur > 0) {
         tracks[i].duration = Math.round(dur * 10) / 10;

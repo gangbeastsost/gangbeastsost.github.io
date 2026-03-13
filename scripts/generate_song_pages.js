@@ -140,6 +140,19 @@ function writeSongPage({ songParam, title, artist, imageRel }) {
   fs.writeFileSync(path.join(dir, 'index.html'), html, 'utf8');
 }
 
+// Airport sections — keep in sync with AIRPORT_SECTIONS in script.js
+const AIRPORT_STAGE = 'Airport';
+const AIRPORT_DEFAULT_IMAGE = 'images/Airport.png';
+const AIRPORT_SECTIONS = [
+  { id: 'Section-A-1', title: 'Airport (Lounge)',              artist: 'Mario Kart Band', cover: null },
+  { id: 'Section-A-2', title: 'Airport (Prepare for Takeoff)', artist: 'Mario Kart Band', cover: null },
+  { id: 'Section-B-1', title: 'Airport (Airborne 1)',          artist: 'Mario Kart Band', cover: 'images/Airport-Flying.png' },
+  { id: 'Section-B-2', title: 'Airport (Airborne 2)',          artist: 'Mario Kart Band', cover: 'images/Airport-Flying.png' },
+  { id: 'Section-B-3', title: 'Airport (Airborne 3)',          artist: 'Mario Kart Band', cover: 'images/Airport-Flying.png' },
+  { id: 'Section-A-3', title: 'Airport (Arrival)',             artist: 'Mario Kart Band', cover: 'images/Airport-Return.png' },
+  { id: 'Section-A-4', title: 'Airport (Ending)',              artist: 'Mario Kart Band', cover: 'images/Airport-Return.png' },
+];
+
 function main() {
   if (!fs.existsSync(tracksPath)) {
     console.error('tracks.json not found:', tracksPath);
@@ -161,6 +174,18 @@ function main() {
       title: t.title || songParam,
       artist: t.artist || '',
       imageRel: t.image || ''
+    });
+    count++;
+  }
+
+  // Generate a page for each Airport section (e.g. Airport-Section-A-1)
+  for (const section of AIRPORT_SECTIONS) {
+    const songParam = `${AIRPORT_STAGE}-${section.id}`;
+    writeSongPage({
+      songParam,
+      title: section.title,
+      artist: section.artist,
+      imageRel: section.cover || AIRPORT_DEFAULT_IMAGE,
     });
     count++;
   }
