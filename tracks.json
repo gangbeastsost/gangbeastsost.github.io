@@ -11,7 +11,7 @@
   {
     "title": "Gang Beasts Days Drums",
     "stage": "Menu",
-    "side": "Drums",
+    "side": "A-Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Days Drums.ogg",
     "image": "images/Gang Beasts Days.png"
@@ -28,7 +28,7 @@
   {
     "title": "Gang Beasts Nights Drums",
     "stage": "Menu",
-    "side": "Drums",
+    "side": "B-Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Nights Drums.ogg",
     "image": "images/Gang Beasts Nights.png"
