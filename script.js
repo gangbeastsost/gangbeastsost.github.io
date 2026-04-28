@@ -1067,6 +1067,9 @@ let _historyRecordedForIndex = -1; // dedup: only record once per play() call pe
 let _historyPendingTimer = null;   // fires after 4s to commit a pending history entry
 let _loopHistoryLastTime = null;
 let _loopHistoryLastIndex = -1;
+const CLICK_PULSE_SELECTOR = 'button, input[type="button"], input[type="submit"], input[type="reset"], a.preload-all, a.modal-action-btn, a.info-modal-btn, [role="button"]';
+const CLICK_PULSE_EXCLUDE_SELECTOR = '.copy-link-btn, #downloadAllBtn, .mini-download, .m-download, [data-action="download"]';
+const clickPulseAnimations = new WeakMap();
 
 const OFFICIAL_ARTIST = 'doseone & Bob Larder';
 
@@ -1237,6 +1240,79 @@ function applyVisualSettings(){
     }
   }catch(e){}
 }
+
+function prefersReducedMotion(){
+  try{
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }catch(e){
+    return false;
+  }
+}
+
+function triggerClickPulse(el){
+  try{
+    if(!el || isReducedAnimations || prefersReducedMotion()) return;
+    if(el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+    if(typeof el.animate !== 'function') return;
+
+    const previous = clickPulseAnimations.get(el);
+    if(previous){
+      try{ previous.cancel(); }catch(e){}
+    }
+
+    const isTrackCard = el.classList && el.classList.contains('track');
+    const keyframes = isTrackCard
+      ? [
+          { scale: 1, offset: 0 },
+          { scale: 0.968, offset: 0.42 },
+          { scale: 1.01, offset: 0.78 },
+          { scale: 1, offset: 1 }
+        ]
+      : [
+          { scale: 1, offset: 0 },
+          { scale: 0.918, offset: 0.38 },
+          { scale: 1.014, offset: 0.76 },
+          { scale: 1, offset: 1 }
+        ];
+    const options = isTrackCard
+      ? {
+          duration: 290,
+          easing: 'cubic-bezier(.25,.9,.3,1)',
+          fill: 'none'
+        }
+      : {
+          duration: 255,
+          easing: 'cubic-bezier(.28,.88,.34,1)',
+          fill: 'none'
+        };
+
+    const animation = el.animate(keyframes, options);
+
+    const cleanup = ()=>{
+      if(clickPulseAnimations.get(el) === animation){
+        clickPulseAnimations.delete(el);
+      }
+    };
+    animation.onfinish = cleanup;
+    animation.oncancel = cleanup;
+    clickPulseAnimations.set(el, animation);
+  }catch(e){}
+}
+
+function setupClickPulse(){
+  try{
+    document.addEventListener('click', (ev)=>{
+      const target = ev.target;
+      if(!(target instanceof Element)) return;
+      const clickable = target.closest(CLICK_PULSE_SELECTOR);
+      if(!clickable) return;
+      if(clickable.matches(CLICK_PULSE_EXCLUDE_SELECTOR)) return;
+      triggerClickPulse(clickable);
+    }, true);
+  }catch(e){}
+}
+
+setupClickPulse();
 
 function isCustomFilterAvailable(){
   try{ return Array.isArray(customExclusionFiles) && customExclusionFiles.length > 0; }catch(e){ return false; }
