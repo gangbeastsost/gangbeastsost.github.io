@@ -1,3 +1,18 @@
+import { isIOSDevice as isIOS, resolveAudioFile as _audioFile } from './js/platform.js';
+import { isTrackAllowedByViewFilter as trackAllowedByViewFilter } from './js/catalog.js';
+import { escapeHtml, formatDuration as fmt, formatTotalDuration as fmtTotal, getDefaultCover } from './js/format.js';
+import { createShuffleQueue } from './js/shuffle.js';
+import {
+  copyTextToClipboard,
+  getSongShareUrl,
+  getTrackSongParam,
+  setCopyButtonState as _setCopyButtonState,
+  setSongQueryParam,
+  wireCopyButtons,
+} from './js/sharing.js';
+import { createHistoryController } from './js/history.js';
+import { downloadCatalogAsZip, downloadTrack } from './js/downloads.js';
+
 const audio = document.getElementById('audio');
 const trackListEl = document.getElementById('trackList');
 const trackTitle = document.getElementById('trackTitle');
@@ -94,29 +109,6 @@ let contextMenuTrackIndex = -1;
 // Media Session (lock screen / OS media controls)
 const HAS_MEDIA_SESSION = (typeof navigator !== 'undefined' && 'mediaSession' in navigator);
 let _lastMediaPositionUpdateMs = 0;
-
-// True only for real Safari (excludes Chrome/Edge/Android which also contain 'Safari' in UA)
-const _isSafari = /safari/i.test(navigator.userAgent) && !/chrome|chromium|crios|android/i.test(navigator.userAgent);
-
-// Resolve the right audio file path for the current browser.
-// Non-Safari: prefer OGG  (.mp3 → .ogg)
-// Safari:     prefer MP3  (.ogg → .mp3)
-function _audioFile(path){
-  if(!path) return path;
-  // Safari: music/X.ogg  →  music/mp3/X.mp3
-  if(_isSafari) return path.replace(/^(music\/)(.+)\.ogg($|\?)/i, '$1mp3/$2.mp3$3');
-  // Non-Safari: music/mp3/X.mp3  →  music/X.ogg  (no-op if already OGG)
-  return path.replace(/^(music\/)mp3\/(.+)\.mp3($|\?)/i, '$1$2.ogg$3');
-}
-
-function isIOS(){
-  try{
-    const ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
-    const iThing = /iPad|iPhone|iPod/.test(ua);
-    const iPadOS13Plus = (navigator && navigator.platform === 'MacIntel' && navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
-    return !!(iThing || iPadOS13Plus);
-  }catch(e){ return false; }
-}
 
 // Lazily wire onstatechange on an AudioContext so iOS 'interrupted'/'suspended'
 // states are handled without requiring a user gesture to restart.
@@ -221,101 +213,21 @@ function getSongParamForTrack(t){
       const sec = _getAirportSectionByTime(timeHint);
       if(sec) return `Airport-${sec.id}`;
     }
-    const stage = (t.stage ? String(t.stage).trim() : '');
-    const side = (t.side ? String(t.side).trim() : '');
-    if(!stage || !side) return null;
-    return `${stage}-${side}`;
+    return getTrackSongParam(t);
   }catch(e){ return null; }
-}
-
-function setSongQueryParam(value){
-  try{
-    const url = new URL(window.location.href);
-    if(value){
-      url.searchParams.set('song', value);
-    } else {
-      url.searchParams.delete('song');
-    }
-    const next = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
-    history.replaceState(null, '', next);
-  }catch(e){}
 }
 
 function getSongShareUrlForTrack(t){
   try{
-    const songParam = getSongParamForTrack(t);
-    if(!songParam) return null;
-    // Match the share-page format used for Discord embeds.
-    return `${window.location.origin}/song/${encodeURIComponent(songParam)}`;
+    return getSongShareUrl(getSongParamForTrack(t));
   }catch(e){ return null; }
 }
 
-async function copyTextToClipboard(text){
-  try{
-    if(!text) return false;
-    if(navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext){
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  }catch(e){}
-
-  // Fallback (older Safari / non-secure contexts)
-  try{
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    ta.style.top = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-    const ok = document.execCommand && document.execCommand('copy');
-    document.body.removeChild(ta);
-    return !!ok;
-  }catch(e){ return false; }
-}
-
-const _copiedBtnTimers = new WeakMap();
-
-function flashCopiedState(btn){
-  try{
-    if(!btn) return;
-    const prev = _copiedBtnTimers.get(btn);
-    if(prev) clearTimeout(prev);
-    btn.classList.add('copied');
-    const t = setTimeout(()=>{
-      try{ btn.classList.remove('copied'); }catch(e){}
-      try{ _copiedBtnTimers.delete(btn); }catch(e){}
-    }, 850);
-    _copiedBtnTimers.set(btn, t);
-  }catch(e){}
-}
-
-function _setCopyButtonState(btn, url){
-  try{
-    if(!btn) return;
-    const has = !!url;
-    btn.disabled = !has;
-    btn.title = has ? 'Copy link' : 'No share link for this track';
-    btn.setAttribute('aria-label', has ? 'Copy link' : 'No share link for this track');
-  }catch(e){}
-}
-
 function _setupStaticCopyButtons(){
-  try{
-    const onCopyCurrent = async (btn)=>{
-      try{
-        const t = (tracks && tracks[index]) ? tracks[index] : null;
-        const url = getSongShareUrlForTrack(t);
-        const ok = await copyTextToClipboard(url);
-        if(ok) flashCopiedState(btn);
-      }catch(e){}
-    };
-    if(heroCopyLink) heroCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(heroCopyLink); });
-    if(miniCopyLink) miniCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(miniCopyLink); });
-    if(mCopyLink) mCopyLink.addEventListener('click', (ev)=>{ try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}; onCopyCurrent(mCopyLink); });
-  }catch(e){}
+  wireCopyButtons(
+    [heroCopyLink, miniCopyLink, mCopyLink],
+    () => getSongShareUrlForTrack(tracks?.[index]),
+  );
 }
 
 function findTrackIndexBySongParam(songParam){
@@ -650,11 +562,7 @@ function _applyAirportSectionState(timeHint, opts={}){
             stage:    t.stage || '',
             side:     t.side  || ''
           };
-          if(_historyPendingTimer) clearTimeout(_historyPendingTimer);
-          _historyPendingTimer = setTimeout(()=>{
-            _historyPendingTimer = null;
-            try{ recordHistoryEntry(_secEntry); }catch(e){}
-          }, 4000);
+          historyController.schedule(index, () => _secEntry, { force: true });
         }
       }catch(e){}
     }
@@ -1054,24 +962,23 @@ let floatingShipPreferredSide = FLOATING_SHIP_SIDE_ORIGINAL;
 
 let recentlyPlayed = []; // Array of track indices (max 20)
 const MAX_RECENT = 20;
-let listenHistory = []; // {title,artist,image,duration,stage,side,ts}
-const MAX_HISTORY = 200;
-const HISTORY_KEY = 'gb:history';
 const REDUCE_ANIMATIONS_KEY = 'gb:reduceAnimations';
 const LITE_MODE_KEY = 'gb:liteMode';
 const CUSTOM_EXCLUSIONS_KEY = 'gb:customExclusions';
 const CUSTOM_EXCLUSIONS_NAME_KEY = 'gb:customExclusionsName';
 const CUSTOM_FILTERS_KEY = 'gb:customFilters';
 const CUSTOM_FILTERS_ACTIVE_KEY = 'gb:customFiltersActive';
-let _historyRecordedForIndex = -1; // dedup: only record once per play() call per track
-let _historyPendingTimer = null;   // fires after 4s to commit a pending history entry
-let _loopHistoryLastTime = null;
-let _loopHistoryLastIndex = -1;
 const CLICK_PULSE_SELECTOR = 'button, input[type="button"], input[type="submit"], input[type="reset"], a.preload-all, a.modal-action-btn, a.info-modal-btn, [role="button"]';
 const CLICK_PULSE_EXCLUDE_SELECTOR = '.copy-link-btn, #downloadAllBtn, .mini-download, .m-download, [data-action="download"]';
 const clickPulseAnimations = new WeakMap();
 
-const OFFICIAL_ARTIST = 'doseone & Bob Larder';
+const historyController = createHistoryController({
+  getTracks: () => tracks,
+  onPlayTrack: (trackIndex) => {
+    loadTrack(trackIndex, { fade: 'cross' });
+    play();
+  },
+});
 
 // Also show the preloading toast during normal <audio> buffering.
 try{
@@ -1090,34 +997,11 @@ try{
 
 function isTrackAllowedByViewFilter(t){
   try{
-    if(!t) return false;
-    const artist = (t.artist ? String(t.artist).trim() : '');
-    const side = (t.side ? String(t.side).trim().toLowerCase() : '');
-    const isDrums = side === 'drums';
-    const fileKey = (t.file ? String(t.file).trim() : '');
-    // 'all' => default list excludes drum tracks
-    if(currentViewFilter === 'all'){
-      return !isDrums;
-    }
-    // custom maps (original behavior), still excluding drums from these views
-    if(currentViewFilter === 'exclude'){
-      return artist === OFFICIAL_ARTIST && !isDrums;
-    }
-    if(currentViewFilter === 'only'){
-      return artist !== OFFICIAL_ARTIST && !isDrums;
-    }
-    if(currentViewFilter === 'drums-include'){
-      return true;
-    }
-    if(currentViewFilter === 'drums-only'){
-      return isDrums;
-    }
-    if(currentViewFilter === 'custom'){
-      if(!Array.isArray(customExclusionFiles) || customExclusionFiles.length === 0) return true;
-      if(customExclusionsMode === 'include') return customExclusionFiles.includes(fileKey);
-      return !customExclusionFiles.includes(fileKey);
-    }
-    return true;
+    return trackAllowedByViewFilter(t, {
+      viewFilter: currentViewFilter,
+      customFiles: customExclusionFiles,
+      customMode: customExclusionsMode,
+    });
   }catch(e){ return true; }
 }
 
@@ -1352,17 +1236,6 @@ function saveCustomExclusions(){
   }catch(e){}
 }
 
-function escapeHtml(s){
-  try{
-    return String(s ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }catch(e){ return ''; }
-}
-
 function renderCustomExclusionsList(){
   try{
     if(!customExcludeList) return;
@@ -1512,9 +1385,6 @@ function findNextAllowedIndex(fromIndex, dir){
   }catch(e){ return (fromIndex + dir + tracks.length) % tracks.length; }
 }
 
-function getDefaultCover(){
-  return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="100%" height="100%" fill="#444" rx="24"/><text x="50%" y="50%" font-size="80" fill="#bbb" font-family="Inter, system-ui, Arial, sans-serif" font-weight="700" dominant-baseline="middle" text-anchor="middle">:(</text></svg>');
-}
 let shuffleQueue = [];
 let shuffleCycleFinished = false;
 let shuffleHistory = [];
@@ -1852,11 +1722,7 @@ function switchToWebLoop(file, offset=0){
 let _bg2PendingListener = null;
 
 function buildShuffleQueue(current){
-  const allowed = getPlayableIndices();
-  if(!allowed || allowed.length <= 1) return [];
-  const arr = allowed.filter(i=>i!==current);
-  for(let i=arr.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]] = [arr[j],arr[i]] }
-  return arr;
+  return createShuffleQueue(getPlayableIndices(), current);
 }
 
 function setPreloading(active){
@@ -2017,11 +1883,8 @@ async function init(){
   }catch(e){}
   renderList();
 
-  // restore listen history FIRST — before any loadTrack call can fire recordHistoryEntry
-  try{
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if(raw){ const parsed = JSON.parse(raw); if(Array.isArray(parsed)) listenHistory = parsed.slice(0, MAX_HISTORY); }
-  }catch(e){ console.warn('restore history failed', e); }
+  // Restore history before any loadTrack call can schedule a new entry.
+  historyController.loadFromStorage();
 
   // restore scroll position saved from previous session
   try{
@@ -2465,11 +2328,7 @@ async function init(){
             const url = getSongShareUrlForTrack(t);
             copyTextToClipboard(url);
           } else if(action === 'download'){
-            const t = tracks[resolvedIndex];
-            const a = document.createElement('a');
-            a.href = encodeURI(t.file);
-            a.download = `${t.title}.mp3`;
-            a.click();
+            downloadTrackAt(resolvedIndex);
           }
         }catch(e){ console.warn('Context menu action failed', e); }
       });
@@ -2593,10 +2452,6 @@ async function init(){
 
 }
 
-function fmtTotal(s){
-  s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
-  return h>0?`${h}h ${m}m`:`${m}m`;
-}
 function updateOSTDuration(){
   try{
     if(!ostDurationEl||!tracks||!tracks.length) return;
@@ -2637,123 +2492,12 @@ function updateOSTDuration(){
 }
 // ── Listen History ─────────────────────────────────────────────────────────
 
-function recordHistoryEntry(t){
-  if(!t) return;
-  const entry = {
-    title:    t.title    || '',
-    artist:   t.artist   || '',
-    image:    t.image    || '',
-    duration: t.duration || null,
-    stage:    t.stage    || '',
-    side:     t.side     || '',
-    ts:       Date.now()
-  };
-  listenHistory.unshift(entry);
-  if(listenHistory.length > MAX_HISTORY) listenHistory.length = MAX_HISTORY;
-  try{ localStorage.setItem(HISTORY_KEY, JSON.stringify(listenHistory)); }catch(e){}
-  // live-refresh panel if it's open
-  try{
-    const panel = document.getElementById('historyPanel');
-    if(panel && panel.classList.contains('open')) renderHistoryPanel();
-  }catch(e){}
-}
-
-function _relativeTime(ts){
-  const diff = Date.now() - ts;
-  const sec  = Math.floor(diff / 1000);
-  const min  = Math.floor(sec  / 60);
-  const hr   = Math.floor(min  / 60);
-  const day  = Math.floor(hr   / 24);
-  if(sec < 60)  return 'Just now';
-  if(min < 60)  return `${min}m ago`;
-  if(hr  < 24)  return `${hr}h ago`;
-  if(day === 1) return 'Yesterday';
-  if(day <  7)  return `${day}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, {month:'short', day:'numeric'});
-}
-
-function _fmtDur(sec){
-  if(!sec || !isFinite(sec)) return '';
-  const m = Math.floor(sec/60), s = Math.floor(sec%60);
-  return `${m}:${s.toString().padStart(2,'0')}`;
-}
-
-function renderHistoryPanel(){
-  const list = document.getElementById('historyList');
-  const stats = document.getElementById('historyStats');
-  if(!list) return;
-
-  // stats
-  if(stats){
-    if(listenHistory.length === 0){
-      stats.textContent = '';
-    } else {
-      const unique = new Set(listenHistory.map(e => e.title + e.artist)).size;
-      stats.textContent = `${listenHistory.length} play${listenHistory.length===1?'':'s'} \u00b7 ${unique} unique track${unique===1?'':'s'}`;
-    }
-  }
-
-  if(listenHistory.length === 0){
-    list.innerHTML = `
-      <div class="history-empty">
-        <svg viewBox="0 0 24 24" width="40" height="40" aria-hidden="true"><path fill="currentColor" opacity=".35" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
-        <p>No history yet</p>
-        <span>Tracks you play will appear here</span>
-      </div>`;
-    return;
-  }
-
-  list.innerHTML = listenHistory.map((e, idx) => {
-    const dur  = e.duration ? `<span class="history-entry__dur">${_fmtDur(e.duration)}</span>` : '';
-    const time = `<span class="history-entry__time">${_relativeTime(e.ts)}</span>`;
-    const imgSrc = e.image ? encodeURI(e.image) : '';
-    return `
-    <div class="history-entry" data-idx="${idx}" role="listitem">
-      <img class="history-entry__cover" src="${imgSrc}" alt="" loading="lazy" onerror="this.style.opacity='.3'">
-      <div class="history-entry__info">
-        <div class="history-entry__title">${e.title}</div>
-        <div class="history-entry__meta">${e.artist}${dur ? ' &middot; ' + dur : ''}</div>
-      </div>
-      <div class="history-entry__right">
-        ${time}
-        <button class="history-entry__play" data-hist-idx="${idx}" title="Play" aria-label="Play ${e.title}">
-          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
-        </button>
-      </div>
-    </div>`;
-  }).join('');
-
-  // wire play buttons
-  list.querySelectorAll('.history-entry__play').forEach(btn => {
-    btn.addEventListener('click', ev => {
-      ev.stopPropagation();
-      const hi = parseInt(btn.dataset.histIdx, 10);
-      const entry = listenHistory[hi];
-      if(!entry || !tracks) return;
-      // find track index by matching title + artist
-      const ti = tracks.findIndex(t => t.title === entry.title && (t.artist||'') === entry.artist);
-      if(ti < 0) return;
-      loadTrack(ti, {fade:'cross'});
-      play();
-    });
-  });
-}
-
 function toggleHistoryPanel(){
-  const panel = document.getElementById('historyPanel');
-  const overlay = document.getElementById('historyOverlay');
-  if(!panel) return;
-  const open = panel.classList.toggle('open');
-  panel.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if(overlay) overlay.classList.toggle('open', open);
-  document.getElementById('historyBtn')?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if(open) renderHistoryPanel();
+  return historyController.toggle();
 }
 
 function clearListenHistory(){
-  listenHistory = [];
-  try{ localStorage.removeItem(HISTORY_KEY); }catch(e){}
-  renderHistoryPanel();
+  return historyController.clear();
 }
 
 // ── End Listen History ───────────────────────────────────────────────────────
@@ -2985,11 +2729,7 @@ function hideContextMenu(){
 function loadTrack(i, opts={fade:'cross'}){
   const resolvedIndex = _resolveTrackIndexForPlayback(i, opts);
   index = resolvedIndex;
-  _historyRecordedForIndex = -1; // reset so next play() records this track fresh
-  // Cancel any pending history entry that hadn't reached the 4-second threshold
-  if(_historyPendingTimer){ clearTimeout(_historyPendingTimer); _historyPendingTimer = null; }
-  _loopHistoryLastTime = null;
-  _loopHistoryLastIndex = index;
+  historyController.resetForTrack(index);
   try{ updateTrackActiveState(); }catch(e){}
   try{ requestAnimationFrame(()=>{ try{ ensureActiveTrackVisible({ smooth:true }); }catch(e){} }); }catch(e){}
   const t = tracks[index];
@@ -3141,8 +2881,7 @@ function loadTrack(i, opts={fade:'cross'}){
 async function play(){
   // record history once per track, only when actually playing (not on load/restore)
   try{
-    if(index !== _historyRecordedForIndex && tracks[index]){
-      _historyRecordedForIndex = index;
+    if(tracks[index]){
       const t = tracks[index];
       // Build the entry now but only commit it after 4 seconds of actual listening
       const buildEntry = () => {
@@ -3152,11 +2891,7 @@ async function play(){
         }
         return t;
       };
-      if(_historyPendingTimer) clearTimeout(_historyPendingTimer);
-      _historyPendingTimer = setTimeout(()=>{
-        _historyPendingTimer = null;
-        try{ recordHistoryEntry(buildEntry()); }catch(e){}
-      }, 4000);
+      historyController.schedule(index, buildEntry);
     }
   }catch(e){}
   // if loop (gapless) mode enabled try to use WebAudio for seamless loop
@@ -3267,20 +3002,13 @@ function startProgress(){
     if(dur && isFinite(dur)){
       const cur = getSmoothCurrentTime();
       try{
-        if(loopMode === 'one' && isPlaying && !_audioSeeking && tracks[index]){
-          if(_loopHistoryLastIndex !== index || _loopHistoryLastTime === null){
-            _loopHistoryLastIndex = index;
-            _loopHistoryLastTime = cur;
-          }else{
-            const prev = _loopHistoryLastTime;
-            const wrapped = prev > (dur * 0.85) && cur < (dur * 0.2) && (prev - cur) > Math.max(0.5, dur * 0.35);
-            if(wrapped) recordHistoryEntry(tracks[index]);
-            _loopHistoryLastTime = cur;
-          }
-        }else{
-          _loopHistoryLastTime = cur;
-          _loopHistoryLastIndex = index;
-        }
+        historyController.observeLoop({
+          trackIndex: index,
+          currentTime: cur,
+          duration: dur,
+          isLooping: loopMode === 'one' && isPlaying && !_audioSeeking,
+          track: tracks[index],
+        });
       }catch(e){}
       const p = (cur/dur)*100;
       if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
@@ -3299,8 +3027,7 @@ function startProgress(){
 
 function stopProgress(){
   if(progressRaf){ cancelAnimationFrame(progressRaf); progressRaf = null; }
-  _loopHistoryLastTime = null;
-  _loopHistoryLastIndex = -1;
+  historyController.resetLoop();
   try{ updateTrackActiveState(); }catch(e){}
   try{ stopBeatPulse(); }catch(e){}
 }
@@ -4256,76 +3983,15 @@ if(mCover){
   });
 }
 
-function fmt(s){
-  if(!s||isNaN(s))return '0:00';
-  const m = Math.floor(s/60);const sec = Math.floor(s%60).toString().padStart(2,'0');return `${m}:${sec}`
-}
-
 function downloadTrackAt(i){
-  try{
-    const t = tracks[i];
-    if(!t || !t.file) return;
-    const url = t.file;
-    const parts = url.split('/');
-    let filename = parts.length? parts[parts.length-1].split('?')[0] : '';
-    if(!filename) filename = (t.title||'track') + '.mp3';
-    const a = document.createElement('a');
-    a.href = encodeURI(url);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }catch(e){ console.warn('download failed', e); }
+  downloadTrack(tracks[i]);
 }
 
 async function downloadAllTracks(){
-  if(!tracks || !tracks.length) return;
-  if(typeof JSZip === 'undefined'){
-    alert('ZIP library not loaded. Please ensure you are online.');
-    return;
-  }
-  try{
-    downloadAllBtn.disabled = true;
-    const zip = new JSZip();
-    for(let i=0;i<tracks.length;i++){
-      const t = tracks[i];
-      const url = encodeURI(t.file);
-      try{
-        if(downloadAllLabel) downloadAllLabel.textContent = `Zipping ${i+1}/${tracks.length}`;
-        else if(downloadAllBtn) downloadAllBtn.textContent = `Zipping ${i+1}/${tracks.length}`;
-        const res = await fetch(url);
-        if(!res.ok) { console.warn('fetch failed', url, res.status); continue; }
-        const blob = await res.blob();
-        const parts = (t.file||url).split('/');
-        let filename = parts.length? parts[parts.length-1].split('?')[0] : (`track-${i+1}.mp3`);
-        if(!filename) filename = `track-${i+1}.mp3`;
-        zip.file(filename, blob);
-      }catch(e){ console.warn('downloadAll: failed to fetch', t.file, e); }
-      // small delay to keep UI responsive
-      await new Promise(r=>setTimeout(r,50));
-    }
-    if(downloadAllLabel) downloadAllLabel.textContent = 'Compressing...';
-    else if(downloadAllBtn) downloadAllBtn.textContent = 'Compressing...';
-    const outBlob = await zip.generateAsync({type:'blob'}, (meta)=>{
-      const txt = `Compressing ${Math.round(meta.percent)}%`;
-      if(downloadAllLabel) downloadAllLabel.textContent = txt;
-      else if(downloadAllBtn) downloadAllBtn.textContent = txt;
-    });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(outBlob);
-    a.download = 'Gang Beasts OST.zip';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
-  }catch(e){ console.warn('downloadAllTracks failed', e); alert('Download failed'); }
-  finally{
-    if(downloadAllBtn){
-      downloadAllBtn.disabled = false;
-      if(downloadAllLabel) downloadAllLabel.textContent = 'Download All';
-      else downloadAllBtn.textContent = 'Download All';
-    }
-  }
+  return downloadCatalogAsZip(tracks, {
+    button: downloadAllBtn,
+    label: downloadAllLabel,
+  });
 }
 
 // keyboard

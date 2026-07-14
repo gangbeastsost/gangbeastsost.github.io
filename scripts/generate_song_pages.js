@@ -44,9 +44,14 @@ function ensureSquareOgImage(imageRel) {
 
     ensureDir(ogImagesDir);
 
-    // Skip if already generated and up-to-date.
+    // Non-Windows environments cannot regenerate the crop, so always reuse a
+    // committed square image when present. This also keeps CI output
+    // deterministic regardless of checkout mtimes.
     try {
       if (fs.existsSync(outAbs)) {
+        if (process.platform !== 'win32') {
+          return { outRel, width: OG_SQUARE_SIZE, height: OG_SQUARE_SIZE };
+        }
         const srcStat = fs.statSync(srcAbs);
         const outStat = fs.statSync(outAbs);
         if (outStat.mtimeMs >= srcStat.mtimeMs) {
@@ -193,4 +198,12 @@ function main() {
   console.log(`Generated ${count} song share page(s) in ${outDir}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  AIRPORT_STAGE,
+  AIRPORT_DEFAULT_IMAGE,
+  AIRPORT_SECTIONS,
+};

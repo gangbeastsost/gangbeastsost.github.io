@@ -14,7 +14,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Days Drums.ogg",
-    "image": "images/Gang Beasts Days.png"
+    "image": "images/Gang Beasts Days.png",
+    "duration": 150.4
   },
   {
     "title": "Gang Beasts Nights",
@@ -31,7 +32,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Gang Beasts Nights Drums.ogg",
-    "image": "images/Gang Beasts Nights.png"
+    "image": "images/Gang Beasts Nights.png",
+    "duration": 164.6
   },
   {
     "title": "Aquarium Splash (UNOFFICIAL NAME)",
@@ -57,7 +59,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Aquarium Drums.ogg",
-    "image": "images/Aquarium.png"
+    "image": "images/Aquarium.png",
+    "duration": 224
   },
   {
     "title": "Beef City",
@@ -83,7 +86,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Beef City Drums.ogg",
-    "image": "images/Alley.png"
+    "image": "images/Alley.png",
+    "duration": 201.9
   },
   {
     "title": "Billboard Bash",
@@ -109,7 +113,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Billboard Drums.ogg",
-    "image": "images/Billboard.png"
+    "image": "images/Billboard.png",
+    "duration": 207
   },
   {
     "title": "Blimp Drift",
@@ -135,7 +140,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Blimp Drums.ogg",
-    "image": "images/Blimp.png"
+    "image": "images/Blimp.png",
+    "duration": 159.4
   },
   {
     "title": "Buoy Beautiful",
@@ -161,7 +167,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Buoy Drums.ogg",
-    "image": "images/Buoy.png"
+    "image": "images/Buoy.png",
+    "duration": 160
   },
   {
     "title": "Chutes Ahoy",
@@ -187,7 +194,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Chutes Drums.ogg",
-    "image": "images/Chutes.png"
+    "image": "images/Chutes.png",
+    "duration": 181.9
   },
   {
     "title": "Containers Bang",
@@ -213,7 +221,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Containers Drums.ogg",
-    "image": "images/Containers.png"
+    "image": "images/Containers.png",
+    "duration": 171.3
   },
   {
     "title": "Crane Swing (UNOFFICIAL NAME)",
@@ -239,7 +248,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Crane Drums.ogg",
-    "image": "images/Crane.png"
+    "image": "images/Crane.png",
+    "duration": 132.4
   },
   {
     "title": "Elevators Impossible",
@@ -265,7 +275,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Elevators Drums.ogg",
-    "image": "images/Elevators.png"
+    "image": "images/Elevators.png",
+    "duration": 158.8
   },
   {
     "title": "Girders Edge",
@@ -291,7 +302,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Girders Drums.ogg",
-    "image": "images/Girders.png"
+    "image": "images/Girders.png",
+    "duration": 172.7
   },
   {
     "title": "Gondola Getdown",
@@ -317,7 +329,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Gondola Drums.ogg",
-    "image": "images/Gondola.png"
+    "image": "images/Gondola.png",
+    "duration": 156.7
   },
   {
     "title": "Grind On",
@@ -343,7 +356,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Grind Drums.ogg",
-    "image": "images/Grind.png"
+    "image": "images/Grind.png",
+    "duration": 156.3
   },
   {
     "title": "Incinerator Sonata",
@@ -369,7 +383,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Incinerator Drums.ogg",
-    "image": "images/Incinerator.png"
+    "image": "images/Incinerator.png",
+    "duration": 192
   },
   {
     "title": "Lighthouse Lovely",
@@ -395,7 +410,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Lighthouse Drums.ogg",
-    "image": "images/Lighthouse.png"
+    "image": "images/Lighthouse.png",
+    "duration": 195.9
   },
   {
     "title": "Ring Rumble",
@@ -421,7 +437,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Ring Drums.ogg",
-    "image": "images/Ring.png"
+    "image": "images/Ring.png",
+    "duration": 162.5
   },
   {
     "title": "Rooftop Viewtiful",
@@ -447,7 +464,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Rooftop Drums.ogg",
-    "image": "images/Roof.png"
+    "image": "images/Roof.png",
+    "duration": 202.5
   },
   {
     "title": "Subway Sly",
@@ -473,7 +491,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Subway Drums.ogg",
-    "image": "images/Subway.png"
+    "image": "images/Subway.png",
+    "duration": 165.5
   },
   {
     "title": "Cooling Dawn",
@@ -499,7 +518,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Towers Drums.ogg",
-    "image": "images/Towers.png"
+    "image": "images/Towers.png",
+    "duration": 165.4
   },
   {
     "title": "Train Rush (UNOFFICIAL NAME)",
@@ -525,7 +545,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Train Drums.ogg",
-    "image": "images/Train.png"
+    "image": "images/Train.png",
+    "duration": 160
   },
   {
     "title": "Trawler Brawler (UNOFFICIAL NAME)",
@@ -551,7 +572,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Trawler Drums.ogg",
-    "image": "images/Trawler.png"
+    "image": "images/Trawler.png",
+    "duration": 255
   },
   {
     "title": "Trucks Thump",
@@ -577,7 +599,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Trucks Drums.ogg",
-    "image": "images/Trucks.png"
+    "image": "images/Trucks.png",
+    "duration": 147.7
   },
   {
     "title": "Fans Forever",
@@ -630,7 +653,8 @@
     "side": "Drums",
     "artist": "doseone & Bob Larder",
     "file": "music/Wheel Drums.ogg",
-    "image": "images/Wheel.png"
+    "image": "images/Wheel.png",
+    "duration": 185.8
   },
   {
     "title": "Floating Ship Symphony (Original)",
@@ -702,7 +726,7 @@
     "artist": "dotpy",
     "file": "music/Totems.ogg",
     "image": "images/Totems.png",
-    "duration": 93.5
+    "duration": 93.4
   },
   {
     "title": "Pause",

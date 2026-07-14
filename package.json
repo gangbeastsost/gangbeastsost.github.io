@@ -1,0 +1,17 @@
+{
+  "name": "gang-beasts-ost-player",
+  "version": "2.1.1",
+  "private": true,
+  "description": "Static web player for the Gang Beasts soundtrack",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "generate:shares": "node scripts/generate_song_pages.js",
+    "validate": "node scripts/validate_catalog.js",
+    "test": "npm run test:smoke",
+    "test:smoke": "playwright test",
+    "test:smoke:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
