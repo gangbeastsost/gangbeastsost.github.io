@@ -3323,8 +3323,17 @@ function setSeekPercent(p){
   try{
     const pct = Math.max(0, Math.min(100, (typeof p === 'number' ? p : parseFloat(p)) || 0));
     const v = pct.toFixed(3) + '%';
-    if(mSeek) mSeek.style.setProperty('--seek-pct', v);
-    if(miniSeek) miniSeek.style.setProperty('--seek-pct', v);
+    // Range thumbs travel between their left/right edges, while a percentage
+    // background spans the input's full width. Offset the fill so it ends at
+    // the center of the 16px thumb instead of creeping beneath it near 100%.
+    const thumbCenterOffset = 8 - (pct * 0.16);
+    const operator = thumbCenterOffset < 0 ? '-' : '+';
+    const fill = `calc(${v} ${operator} ${Math.abs(thumbCenterOffset).toFixed(3)}px)`;
+    [mSeek, miniSeek].forEach(seek => {
+      if(!seek) return;
+      seek.style.setProperty('--seek-pct', v);
+      seek.style.setProperty('--seek-fill', fill);
+    });
   }catch(e){}
 }
 

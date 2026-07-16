@@ -92,12 +92,22 @@ test('keeps the playing-card hover lift and uses the gummy timeline styling', as
       borderWidth: style.borderTopWidth,
       borderColor: style.borderTopColor,
       backgroundSize: style.backgroundSize,
+      overflow: style.overflow,
     };
   });
   expect(timelineStyle.height).toBe('14px');
   expect(timelineStyle.borderWidth).toBe('1px');
   expect(timelineStyle.borderColor).toBe('rgba(255, 243, 213, 0.38)');
-  expect(timelineStyle.backgroundSize).toContain('0% 100%');
+  expect(timelineStyle.backgroundSize).toContain('8px 100%');
+  expect(timelineStyle.overflow).toBe('visible');
+
+  await page.locator('#miniSeek').evaluate((element) => {
+    element.value = '99';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const endpointFill = await page.locator('#miniSeek').evaluate((element) =>
+    element.style.getPropertyValue('--seek-fill'));
+  expect(endpointFill).toBe('calc(99.000% - 7.840px)');
 });
 
 test('plays, pauses, seeks, and changes tracks', async ({ page }) => {
@@ -132,14 +142,14 @@ test('opens dedicated share links as paused deep links', async ({ page }) => {
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.paused)).toBe(true);
 });
 
-test('uses OGG when the browser reports OGG Vorbis support', async ({ page }) => {
+test('uses the catalog M4A file', async ({ page }) => {
   await openPlayer(page, '/?song=Tutorial-A');
 
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.currentSrc || audio.src))
-    .toMatch(/\/music\/Tutorial\.ogg$/);
+    .toMatch(/\/music\/m4a\/Tutorial\.m4a$/);
 });
 
-test('uses OGG when Safari rejects the codec probe but accepts the container', async ({ page }) => {
+test('keeps using M4A when Safari reports partial OGG support', async ({ page }) => {
   await page.addInitScript(() => {
     const nativeCanPlayType = HTMLMediaElement.prototype.canPlayType;
     HTMLMediaElement.prototype.canPlayType = function canPlayType(type) {
@@ -152,10 +162,10 @@ test('uses OGG when Safari rejects the codec probe but accepts the container', a
   await openPlayer(page, '/?song=Tutorial-A');
 
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.currentSrc || audio.src))
-    .toMatch(/\/music\/Tutorial\.ogg$/);
+    .toMatch(/\/music\/m4a\/Tutorial\.m4a$/);
 });
 
-test('uses the MP3 mirror when OGG Vorbis is unavailable', async ({ page }) => {
+test('keeps using M4A when OGG Vorbis is unavailable', async ({ page }) => {
   await page.addInitScript(() => {
     const nativeCanPlayType = HTMLMediaElement.prototype.canPlayType;
     HTMLMediaElement.prototype.canPlayType = function canPlayType(type) {
@@ -166,7 +176,7 @@ test('uses the MP3 mirror when OGG Vorbis is unavailable', async ({ page }) => {
   await openPlayer(page, '/?song=Tutorial-A');
 
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.currentSrc || audio.src))
-    .toMatch(/\/music\/mp3\/Tutorial\.mp3$/);
+    .toMatch(/\/music\/m4a\/Tutorial\.m4a$/);
 });
 
 test('uses catalog timing when browser media metadata reports the wrong duration', async ({ page }) => {
@@ -294,7 +304,7 @@ test('ignores stale media readiness when tracks are switched rapidly', async ({ 
 
   await expect(page.locator('#trackTitle')).toHaveText('Gondola Dive');
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.currentSrc || audio.src))
-    .toMatch(/\/music\/Gondola%20Dive\.ogg$/);
+    .toMatch(/\/music\/m4a\/Gondola%20Dive\.m4a$/);
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.paused)).toBe(false);
   await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.currentTime)).toBeGreaterThan(0);
 });
@@ -315,15 +325,15 @@ test('keeps playback controls paused when native playback rejects', async ({ pag
   await expect(page.locator('#heroArt')).not.toHaveClass(/playing/);
 });
 
-test('downloads an individual track from its MP3 mirror', async ({ page }) => {
+test('downloads an individual M4A track', async ({ page }) => {
   await openPlayer(page, '/?song=Tutorial-A');
 
   const downloadPromise = page.waitForEvent('download');
   await page.locator('#miniDownload').click();
   const download = await downloadPromise;
 
-  expect(download.suggestedFilename()).toBe('Tutorial.mp3');
-  expect(download.url()).toMatch(/\/music\/mp3\/Tutorial\.mp3$/);
+  expect(download.suggestedFilename()).toBe('Tutorial.m4a');
+  expect(download.url()).toMatch(/\/music\/m4a\/Tutorial\.m4a$/);
 });
 
 test('opens and closes the custom track context menu', async ({ page }) => {

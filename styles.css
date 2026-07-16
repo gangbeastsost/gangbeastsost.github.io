@@ -1955,9 +1955,11 @@ body::after{
 /* Chunky broadcast-style timeline shared by the mini and modal players. */
 .seek-common,.m-progress input[type=range]{
   --seek-track:#3a283c;
+  --seek-fill:8px;
   box-sizing:border-box;
   height:14px;
   padding:0;
+  overflow:visible;
   cursor:pointer;
   border:1px solid rgba(255,243,213,.38);
   border-radius:999px;
@@ -1965,7 +1967,7 @@ body::after{
   background-image:
     linear-gradient(90deg,var(--accent),var(--accent-2)),
     linear-gradient(90deg,var(--seek-track),var(--seek-track));
-  background-size:var(--seek-pct) 100%,100% 100%;
+  background-size:var(--seek-fill) 100%,100% 100%;
   background-position:left center,left center;
   box-shadow:inset 0 1px 1px rgba(10,5,12,.55),0 1px 0 rgba(10,5,12,.5);
   transition:box-shadow .16s ease,filter .16s ease;
