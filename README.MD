@@ -42,7 +42,7 @@ Serve the repository over HTTP so the player can fetch `tracks.json` and seek th
 npm start
 ```
 
-Validate the catalog, referenced media, Safari MP3 copies, metadata, and generated song pages:
+Validate the catalog, referenced M4A audio, metadata, and generated song pages:
 
 ```sh
 node scripts/validate_catalog.js

@@ -16,6 +16,7 @@ const CONTENT_TYPES = {
   '.ico': 'image/x-icon',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.m4a': 'audio/mp4',
   '.mp3': 'audio/mpeg',
   '.mp4': 'video/mp4',
   '.ogg': 'audio/ogg',

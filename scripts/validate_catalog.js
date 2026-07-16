@@ -178,20 +178,14 @@ function validateTracks(tracks) {
     }
 
     if (typeof track.file === 'string' && track.file.trim()) {
-      checkFile(track.file, `${label} audio`);
+      const audioPath = track.file.trim().replace(/\\/g, '/');
+      checkFile(audioPath, `${label} M4A audio`);
 
-      if (/\.ogg$/i.test(track.file.trim())) {
-        const mp3Path = track.file.trim().replace(/^(music\/)(.+)\.ogg$/i, '$1mp3/$2.mp3');
-        if (mp3Path === track.file.trim()) {
-          error(
-            'audio-path-layout',
-            `${label} OGG path cannot be mapped to Safari MP3 layout: ${track.file}`,
-          );
-        } else {
-          checkFile(mp3Path, `${label} Safari MP3`);
-        }
-      } else {
-        warn('audio-format', `${label} does not reference an OGG file: ${track.file}`);
+      if (!/^music\/m4a\/.+\.m4a$/i.test(audioPath)) {
+        error(
+          'audio-path-layout',
+          `${label} must reference an M4A file under music/m4a/: ${track.file}`,
+        );
       }
     }
 

@@ -2,9 +2,9 @@
 /**
  * bake_durations.js
  * 
- * Reads every MP3 in tracks.json, measures its duration with a pure-Node
- * MPEG-frame parser (no npm packages required), and writes a `duration`
- * field (seconds, rounded to 1 decimal) back into tracks.json.
+ * Reads every audio file in tracks.json, measures its duration with pure-Node
+ * format parsers (no npm packages required), and writes a `duration` field
+ * (seconds, rounded to 1 decimal) back into tracks.json.
  *
  * Usage:
  *   node scripts/bake_durations.js
@@ -221,6 +221,97 @@ function getOggDuration(buf) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure-Node M4A / ISO Base Media duration parser
+// Reads the movie header (mvhd), then falls back to media headers (mdhd).
+// Supports ordinary and extended-size atoms plus version 0/1 time fields.
+// ---------------------------------------------------------------------------
+
+function readMp4Atom(buf, offset, end) {
+  if (offset < 0 || offset + 8 > end || end > buf.length) return null;
+
+  const size32 = buf.readUInt32BE(offset);
+  const type = buf.toString('latin1', offset + 4, offset + 8);
+  let headerSize = 8;
+  let size = size32;
+
+  if (size32 === 1) {
+    if (offset + 16 > end) return null;
+    const extendedSize = buf.readBigUInt64BE(offset + 8);
+    if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    size = Number(extendedSize);
+    headerSize = 16;
+  } else if (size32 === 0) {
+    size = end - offset;
+  }
+
+  if (size < headerSize || offset + size > end) return null;
+  return {
+    type,
+    start: offset,
+    end: offset + size,
+    dataStart: offset + headerSize,
+  };
+}
+
+function findMp4Children(buf, start, end, wantedType) {
+  const matches = [];
+  let offset = start;
+
+  while (offset + 8 <= end) {
+    const atom = readMp4Atom(buf, offset, end);
+    if (!atom) break;
+    if (atom.type === wantedType) matches.push(atom);
+    if (atom.end <= offset) break;
+    offset = atom.end;
+  }
+  return matches;
+}
+
+function parseMp4TimeHeader(buf, atom) {
+  const start = atom.dataStart;
+  if (start + 4 > atom.end) return null;
+  const version = buf[start];
+  let timescale;
+  let duration;
+
+  if (version === 0) {
+    if (start + 20 > atom.end) return null;
+    timescale = buf.readUInt32BE(start + 12);
+    duration = BigInt(buf.readUInt32BE(start + 16));
+  } else if (version === 1) {
+    if (start + 32 > atom.end) return null;
+    timescale = buf.readUInt32BE(start + 20);
+    duration = buf.readBigUInt64BE(start + 24);
+  } else {
+    return null;
+  }
+
+  if (!timescale || duration <= 0n) return null;
+  return Number(duration) / timescale;
+}
+
+function getM4aDuration(buf) {
+  const moov = findMp4Children(buf, 0, buf.length, 'moov')[0];
+  if (!moov) return null;
+
+  const movieHeader = findMp4Children(buf, moov.dataStart, moov.end, 'mvhd')[0];
+  const movieDuration = movieHeader ? parseMp4TimeHeader(buf, movieHeader) : null;
+
+  let longestMediaDuration = 0;
+  const tracks = findMp4Children(buf, moov.dataStart, moov.end, 'trak');
+  tracks.forEach((track) => {
+    const media = findMp4Children(buf, track.dataStart, track.end, 'mdia')[0];
+    if (!media) return;
+    const mediaHeader = findMp4Children(buf, media.dataStart, media.end, 'mdhd')[0];
+    if (!mediaHeader) return;
+    const duration = parseMp4TimeHeader(buf, mediaHeader);
+    if (Number.isFinite(duration) && duration > longestMediaDuration) longestMediaDuration = duration;
+  });
+  if (longestMediaDuration > 0) return longestMediaDuration;
+  return Number.isFinite(movieDuration) && movieDuration > 0 ? movieDuration : null;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -251,7 +342,10 @@ async function main() {
     try {
       const buf = fs.readFileSync(filePath);
       const ext = path.extname(t.file).toLowerCase();
-      const dur = (ext === '.ogg' || ext === '.oga') ? getOggDuration(buf) : getMp3Duration(buf);
+      let dur = null;
+      if (ext === '.m4a' || ext === '.mp4') dur = getM4aDuration(buf);
+      else if (ext === '.ogg' || ext === '.oga') dur = getOggDuration(buf);
+      else if (ext === '.mp3') dur = getMp3Duration(buf);
 
       if (typeof dur === 'number' && isFinite(dur) && dur > 0) {
         tracks[i].duration = Math.round(dur * 10) / 10;

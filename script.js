@@ -1,4 +1,4 @@
-import { isIOSDevice as isIOS, resolveAudioFile as _audioFile } from './js/platform.js';
+import { isIOSDevice as isIOS, isSafariBrowser as isSafari, resolveAudioFile } from './js/platform.js';
 import { isTrackAllowedByViewFilter as trackAllowedByViewFilter } from './js/catalog.js';
 import { escapeHtml, formatDuration as fmt, formatTotalDuration as fmtTotal, getDefaultCover } from './js/format.js';
 import { createShuffleQueue } from './js/shuffle.js';
@@ -14,6 +14,7 @@ import { createHistoryController } from './js/history.js';
 import { downloadCatalogAsZip, downloadTrack } from './js/downloads.js';
 
 const audio = document.getElementById('audio');
+const _audioFile = (filePath) => resolveAudioFile(filePath, audio);
 const trackListEl = document.getElementById('trackList');
 const trackTitle = document.getElementById('trackTitle');
 const trackArtist = document.getElementById('trackArtist');
@@ -209,7 +210,7 @@ function getSongParamForTrack(t){
   try{
     if(!t) return null;
     if(_isAirportTrack(t)){
-      const timeHint = (tracks && tracks[index] === t) ? _getMediaPosition() : 0;
+      const timeHint = (tracks && tracks[index] === t) ? _getTimelinePosition() : 0;
       const sec = _getAirportSectionByTime(timeHint);
       if(sec) return `Airport-${sec.id}`;
     }
@@ -267,6 +268,7 @@ const FLOATING_SHIP_SIDE_GAME = 'Game';
 const FLOATING_SHIP_SIDE_KEY = 'gb:floatingShipSide';
 const AIRPORT_STAGE = 'Airport';
 const AIRPORT_LOOP_START = 3.243; // intro ends here; looping skips back to this point
+const SAFARI_SEEK_PREROLL_SECONDS = 0.25;
 const AIRPORT_SECTIONS = [
   { id:'Section-A-1', start:0,       title:'Airport (Lounge)',     artist:'Mario Kart Band', cover:null },
   { id:'Section-A-2', start:58.824,  title:'Airport (Prepare for Takeoff)',     artist:'Mario Kart Band', cover:null },
@@ -314,12 +316,7 @@ function _syncSeekUiToCurrentPosition(){
     const dur = _getMediaDuration();
     if(!dur || !isFinite(dur)) return;
     const cur = _getMediaPosition();
-    const p = Math.max(0, Math.min(100, (cur / dur) * 100));
-    if(mSeek) mSeek.value = p;
-    if(miniSeek) miniSeek.value = p;
-    setSeekPercent(p);
-    if(mCur) mCur.textContent = fmt(cur);
-    if(miniCur) miniCur.textContent = fmt(cur);
+    _updateTimingUi(cur, dur);
   }catch(e){}
 }
 
@@ -348,7 +345,7 @@ function _seekAirportSectionByDelta(delta){
     if(!_isAirportTrack(t)) return false;
     let currentIdx = _getAirportSectionIndexById(activeAirportSectionId);
     if(currentIdx < 0 || currentIdx >= AIRPORT_SECTIONS.length){
-      const currentSection = _getAirportSectionForTrack(t, _getMediaPosition()) || AIRPORT_SECTIONS[0];
+      const currentSection = _getAirportSectionForTrack(t, _getTimelinePosition()) || AIRPORT_SECTIONS[0];
       currentIdx = _getAirportSectionIndexById(currentSection && currentSection.id);
     }
     const targetIdx = Math.max(0, Math.min(AIRPORT_SECTIONS.length - 1, currentIdx + (delta > 0 ? 1 : -1)));
@@ -356,7 +353,7 @@ function _seekAirportSectionByDelta(delta){
     const target = AIRPORT_SECTIONS[targetIdx];
     if(!target) return true;
     _applyAirportSectionState(target.start, { force: true, sectionId: target.id, crossfade: true, waveformFade: false });
-    _seekToSeconds(target.start, { skipAirportApply: true });
+    _seekToSeconds(target.start, { skipAirportApply: true, safariSeekWarmup: true });
     return true;
   }catch(e){ return false; }
 }
@@ -422,7 +419,9 @@ function _getAirportSectionForTrack(t, timeHint){
     if(!_isAirportTrack(t)) return null;
     let sec = null;
     if(typeof timeHint === 'number' && isFinite(timeHint)) sec = _getAirportSectionByTime(timeHint);
-    else if(tracks && tracks[index] === t) sec = _getAirportSectionByTime(_getMediaPosition());
+    else if(tracks && tracks[index] === t){
+      sec = _getAirportSectionById(activeAirportSectionId) || _getAirportSectionByTime(_getTimelinePosition());
+    }
     else sec = _getAirportSectionByTime(0);
     return sec;
   }catch(e){ return null; }
@@ -759,21 +758,20 @@ function _applyFloatingShipVersion(nextSide){
 }
 
 let _preloadToastTimer = null;
+let _preloadToastHideTimer = null;
+let _preloadToastShownAt = 0;
 
 function showPreloadToast(msg, opts={}){
   try{
     if(!preloadToast) return;
     if(_preloadToastTimer){ clearTimeout(_preloadToastTimer); _preloadToastTimer = null; }
+    if(_preloadToastHideTimer){ clearTimeout(_preloadToastHideTimer); _preloadToastHideTimer = null; }
     const showSpinner = !(opts && opts.spinner === false);
-    // small delay prevents flicker when decode/buffer is very fast
-    _preloadToastTimer = setTimeout(()=>{
-      try{
-        if(msg && preloadToastText) preloadToastText.textContent = msg;
-        preloadToast.classList.toggle('preload-toast--no-spinner', !showSpinner);
-        preloadToast.setAttribute('aria-hidden', 'false');
-        preloadToast.classList.add('show');
-      }catch(e){}
-    }, 120);
+    if(msg && preloadToastText) preloadToastText.textContent = msg;
+    preloadToast.classList.toggle('preload-toast--no-spinner', !showSpinner);
+    preloadToast.setAttribute('aria-hidden', 'false');
+    preloadToast.classList.add('show');
+    _preloadToastShownAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   }catch(e){}
 }
 
@@ -794,9 +792,63 @@ function _getMediaDuration(){
 function _getMediaPosition(){
   try{
     if(webPlaying && webSource && webSource.buffer) return getWebCurrentTime();
-    if(webOffsetValid) return webOffset;
+    // A saved WebAudio offset is only authoritative while native media is paused.
+    // Once native playback starts, audio.currentTime must be allowed to advance.
+    if(webOffsetValid && (!audio || audio.paused)) return webOffset;
   }catch(e){}
   try{ return (audio && typeof audio.currentTime === 'number') ? audio.currentTime : 0; }catch(e){ return 0; }
+}
+
+function _getCatalogDuration(trackIndex=index){
+  try{
+    const loadedDuration = Number(trackDurations && trackDurations[trackIndex]);
+    if(Number.isFinite(loadedDuration) && loadedDuration > 0) return loadedDuration;
+    const bakedDuration = Number(tracks && tracks[trackIndex] && tracks[trackIndex].duration);
+    return Number.isFinite(bakedDuration) && bakedDuration > 0 ? bakedDuration : null;
+  }catch(e){ return null; }
+}
+
+// A browser may report the wrong total duration while currentTime remains an
+// ordinary media timestamp (Safari does this for some OGG files). Do not scale
+// positions by that bad duration: doing so moves real seek targets too far ahead.
+function _mediaTimeToCatalogTime(mediaTime, mediaDuration=_getMediaDuration(), trackIndex=index){
+  return Math.max(0, Number(mediaTime) || 0);
+}
+
+function _catalogTimeToMediaTime(catalogTime, mediaDuration=_getMediaDuration(), trackIndex=index){
+  return Math.max(0, Number(catalogTime) || 0);
+}
+
+function _getTimelinePosition(){
+  return _mediaTimeToCatalogTime(_getMediaPosition(), _getMediaDuration());
+}
+
+function _getDisplayTiming(mediaPosition, mediaDuration){
+  const safeMediaDuration = Number(mediaDuration);
+  const safeMediaPosition = Math.max(0, Number(mediaPosition) || 0);
+  const catalogDuration = _getCatalogDuration();
+  const displayDuration = catalogDuration || (Number.isFinite(safeMediaDuration) && safeMediaDuration > 0 ? safeMediaDuration : null);
+  let displayPosition = _mediaTimeToCatalogTime(safeMediaPosition, safeMediaDuration);
+  if(displayDuration) displayPosition = Math.max(0, Math.min(displayDuration, displayPosition));
+  return { displayDuration, displayPosition };
+}
+
+function _updateTimingUi(mediaPosition, mediaDuration, opts={}){
+  try{
+    const safeMediaDuration = Number(mediaDuration);
+    const safeMediaPosition = Math.max(0, Number(mediaPosition) || 0);
+    const timing = _getDisplayTiming(safeMediaPosition, safeMediaDuration);
+    if(opts.updateSeek !== false && Number.isFinite(safeMediaDuration) && safeMediaDuration > 0){
+      const percent = Math.max(0, Math.min(100, (safeMediaPosition / safeMediaDuration) * 100));
+      if(mSeek) mSeek.value = percent;
+      if(miniSeek) miniSeek.value = percent;
+      setSeekPercent(percent);
+    }
+    if(mCur) mCur.textContent = fmt(timing.displayPosition);
+    if(miniCur) miniCur.textContent = fmt(timing.displayPosition);
+    if(mRem) mRem.textContent = timing.displayDuration ? fmt(timing.displayDuration) : '';
+    if(miniRem) miniRem.textContent = timing.displayDuration ? fmt(timing.displayDuration) : '';
+  }catch(e){}
 }
 
 function updateMediaSessionMetadata(t){
@@ -840,10 +892,11 @@ function updateMediaSessionPosition(force=false){
     if(typeof navigator.mediaSession.setPositionState !== 'function') return;
     const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     if(!force && now - _lastMediaPositionUpdateMs < 900) return;
-    const duration = _getMediaDuration();
-    if(!duration || !isFinite(duration)) return;
+    const mediaDuration = _getMediaDuration();
+    if(!mediaDuration || !isFinite(mediaDuration)) return;
+    const duration = _getCatalogDuration() || mediaDuration;
     const rawPos = _getMediaPosition();
-    const position = Math.max(0, Math.min(duration, (typeof rawPos === 'number' ? rawPos : 0)));
+    const position = Math.max(0, Math.min(duration, _mediaTimeToCatalogTime(rawPos, mediaDuration)));
     navigator.mediaSession.setPositionState({ duration, playbackRate: 1, position });
     _lastMediaPositionUpdateMs = now;
   }catch(e){}
@@ -863,39 +916,36 @@ function _seekToSeconds(targetSeconds, opts={}){
     const webDur = (webSource && webSource.buffer) ? webSource.buffer.duration : null;
     const dur = (webDur && isFinite(webDur)) ? webDur : (buf && buf.duration ? buf.duration : audio.duration);
     if(!dur || !isFinite(dur)) return;
-    const clamped = Math.max(0, Math.min(dur, targetSeconds));
+    const timelineDuration = _getCatalogDuration() || dur;
+    const timelineTarget = Math.max(0, Math.min(timelineDuration, Number(targetSeconds) || 0));
+    const mediaTarget = _catalogTimeToMediaTime(timelineTarget, dur);
 
     if(loopActive && buf){
       if(isPlaying){
-        switchToWebLoop(file, clamped);
+        switchToWebLoop(file, mediaTarget);
         // Sync audio.currentTime to the seek target so iOS scrubbing doesn't snap back.
-        try{ if(audio) audio.currentTime = clamped; }catch(e){}
+        try{ if(audio) audio.currentTime = _catalogTimeToMediaTime(timelineTarget, audio.duration); }catch(e){}
       } else {
-        webOffset = clamped;
+        webOffset = mediaTarget;
         webOffsetValid = true;
-        try{ audio.currentTime = clamped; }catch(e){}
+        try{ audio.currentTime = _catalogTimeToMediaTime(timelineTarget, audio.duration); }catch(e){}
       }
     } else {
       webOffsetValid = false;
-      try{ audio.currentTime = clamped; }catch(e){}
+      _seekNativeAudio(mediaTarget, opts);
     }
 
     // keep UI + media position in sync
     try{
-      const p = (clamped / dur) * 100;
-      if(mSeek) mSeek.value = p;
-      if(miniSeek) miniSeek.value = p;
-      setSeekPercent(p);
-      if(mCur) mCur.textContent = fmt(clamped);
-      if(miniCur) miniCur.textContent = fmt(clamped);
+      _updateTimingUi(mediaTarget, dur);
     }catch(e){}
-    try{ _audioTimeBase = clamped; _audioTimeStamp = _nowMs(); }catch(e){}
+    try{ _audioTimeBase = mediaTarget; _audioTimeStamp = _nowMs(); }catch(e){}
     try{ updateMediaSessionPosition(true); }catch(e){}
     // skipAirportApply is set when the caller has already applied section metadata
     // (e.g. _seekAirportSectionByDelta), so we don't run a potentially stale time-lookup.
     if(!(opts && opts.skipAirportApply)){
       const waveInfoFade = !(opts && opts.suppressWaveformInfoFade);
-      try{ _applyAirportSectionState(clamped, {force:true, crossfade:true, waveformFade: waveInfoFade}); }catch(e){}
+      try{ _applyAirportSectionState(timelineTarget, {force:true, crossfade:true, waveformFade: waveInfoFade}); }catch(e){}
     }
   }catch(e){}
 }
@@ -904,8 +954,7 @@ function _seekBySeconds(delta, opts={}){
   try{
     const duration = _getMediaDuration();
     if(!duration || !isFinite(duration)) return;
-    const cur = _getMediaPosition();
-    _seekToSeconds((cur || 0) + delta, opts);
+    _seekToSeconds(_getTimelinePosition() + delta, opts);
   }catch(e){}
 }
 
@@ -930,9 +979,17 @@ function hidePreloadToast(){
   try{
     if(_preloadToastTimer){ clearTimeout(_preloadToastTimer); _preloadToastTimer = null; }
     if(!preloadToast) return;
-    preloadToast.classList.remove('show');
-    preloadToast.classList.remove('preload-toast--no-spinner');
-    preloadToast.setAttribute('aria-hidden', 'true');
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const remaining = Math.max(0, 420 - (now - _preloadToastShownAt));
+    const finish = ()=>{
+      _preloadToastHideTimer = null;
+      preloadToast.classList.remove('show');
+      preloadToast.classList.remove('preload-toast--no-spinner');
+      preloadToast.setAttribute('aria-hidden', 'true');
+    };
+    if(_preloadToastHideTimer) clearTimeout(_preloadToastHideTimer);
+    if(remaining > 0) _preloadToastHideTimer = setTimeout(finish, remaining);
+    else finish();
   }catch(e){}
 }
 
@@ -941,6 +998,14 @@ let trackDurations = [];
 let durationLoadedCount = 0;
 let index = 0;
 let isPlaying = false;
+let _mediaLoadToken = 0;
+let _mediaLoadPending = false;
+let _mediaLoadSource = '';
+let _mediaLoadReady = Promise.resolve({ token: 0, seek: 0 });
+let _cancelMediaPreparation = null;
+let _cancelSafariSeekResume = null;
+let _safariSeekResumePending = false;
+let _safariSeekResumeToken = 0;
 let isShuffling = false;
 let loopMode = 'off'; // 'off' | 'one' | 'all'
 let isAutoplay = true;
@@ -959,6 +1024,266 @@ window.currentViewFilter = currentViewFilter;
 let progressRaf = null;
 let searchQuery = '';
 let floatingShipPreferredSide = FLOATING_SHIP_SIDE_ORIGINAL;
+
+function _setPlaybackState(playing){
+  const nextState = !!playing;
+  isPlaying = nextState;
+  try{ if(mPlay) mPlay.textContent = nextState ? '❚❚' : '▶'; }catch(e){}
+  try{ if(miniPlay) miniPlay.textContent = nextState ? '❚❚' : '▶'; }catch(e){}
+  try{ if(heroArt) heroArt.classList.toggle('playing', nextState); }catch(e){}
+  try{ if(nextState && miniPlayer) miniPlayer.classList.remove('hidden'); }catch(e){}
+  try{ nextState ? startProgress() : stopProgress(); }catch(e){}
+  try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+}
+
+function _beginNativeMediaLoad(source, initialSeek=0){
+  _safariSeekResumeToken++;
+  try{ if(_cancelSafariSeekResume) _cancelSafariSeekResume(); }catch(e){}
+  try{ if(_cancelMediaPreparation) _cancelMediaPreparation(); }catch(e){}
+  try{ showPreloadToast('Loading track…'); }catch(e){}
+
+  const token = ++_mediaLoadToken;
+  const seekTarget = Math.max(0, Number(initialSeek) || 0);
+  const holdMuted = seekTarget > 0;
+  const previousMuted = !!audio.muted;
+  _mediaLoadPending = true;
+  _mediaLoadSource = source;
+  _setPlaybackState(false);
+  try{ audio.pause(); }catch(e){}
+  if(holdMuted){
+    try{ audio.muted = true; }catch(e){}
+  }
+
+  _mediaLoadReady = new Promise((resolve, reject)=>{
+    let settled = false;
+    let timeoutId = null;
+
+    const isCurrent = ()=> token === _mediaLoadToken;
+    const cleanup = ()=>{
+      ['loadedmetadata', 'durationchange', 'progress', 'canplay', 'seeked', 'error']
+        .forEach(eventName=>{ try{ audio.removeEventListener(eventName, onMediaEvent); }catch(e){} });
+      if(timeoutId) clearTimeout(timeoutId);
+      if(isCurrent()){
+        _mediaLoadPending = false;
+        _cancelMediaPreparation = null;
+        if(holdMuted){ try{ audio.muted = previousMuted; }catch(e){} }
+        try{ hidePreloadToast(); }catch(e){}
+      }
+    };
+    const finish = ()=>{
+      if(settled) return;
+      settled = true;
+      cleanup();
+      resolve({ token, seek: seekTarget });
+    };
+    const getMediaSeekTarget = ()=> _catalogTimeToMediaTime(seekTarget, audio.duration);
+    const fail = (cause)=>{
+      if(settled) return;
+      settled = true;
+      cleanup();
+      reject(cause instanceof Error ? cause : new Error(String(cause || 'Media load failed')));
+    };
+    const targetIsSeekable = ()=>{
+      if(seekTarget <= 0) return true;
+      const mediaSeekTarget = getMediaSeekTarget();
+      try{
+        for(let rangeIndex = 0; rangeIndex < audio.seekable.length; rangeIndex++){
+          if(audio.seekable.start(rangeIndex) <= mediaSeekTarget && audio.seekable.end(rangeIndex) >= mediaSeekTarget) return true;
+        }
+      }catch(e){}
+      return false;
+    };
+    const attemptPreparation = ()=>{
+      if(!isCurrent()){
+        fail(Object.assign(new Error('Superseded media load'), { name: 'AbortError' }));
+        return;
+      }
+      if(audio.readyState < 1) return;
+      if(seekTarget <= 0){ finish(); return; }
+      if(!targetIsSeekable()) return;
+      try{
+        const mediaSeekTarget = getMediaSeekTarget();
+        if(Math.abs((audio.currentTime || 0) - mediaSeekTarget) <= 0.12 && !audio.seeking){
+          finish();
+          return;
+        }
+        audio.currentTime = mediaSeekTarget;
+        if(!audio.seeking && Math.abs((audio.currentTime || 0) - mediaSeekTarget) <= 0.12) finish();
+      }catch(e){ fail(e); }
+    };
+    function onMediaEvent(event){
+      if(event.type === 'error'){
+        fail(audio.error || new Error(`Unable to load ${source}`));
+        return;
+      }
+      attemptPreparation();
+    }
+
+    ['loadedmetadata', 'durationchange', 'progress', 'canplay', 'seeked', 'error']
+      .forEach(eventName=>audio.addEventListener(eventName, onMediaEvent));
+    timeoutId = setTimeout(()=>{
+      fail(new Error(seekTarget > 0
+        ? `Timed out preparing seek to ${seekTarget}s`
+        : 'Timed out loading audio metadata'));
+    }, 12000);
+    _cancelMediaPreparation = ()=>{
+      fail(Object.assign(new Error('Superseded media load'), { name: 'AbortError' }));
+    };
+  });
+  // A paused deep link may never call play(), so keep cancelled/failed preparation
+  // from surfacing as an unhandled rejection while preserving it for play() to await.
+  _mediaLoadReady.catch(()=>{});
+
+  try{
+    audio.src = encodeURI(source);
+    audio.load();
+  }catch(e){
+    try{ if(_cancelMediaPreparation) _cancelMediaPreparation(); }catch(e2){}
+  }
+  return token;
+}
+
+function _seekNativeAudio(mediaTarget, opts={}){
+  const useSafariWarmup = !!(opts && opts.safariSeekWarmup) && isSafari();
+  const shouldResume = _safariSeekResumePending || !!(audio && !audio.paused && !audio.ended);
+  const resumeToken = ++_safariSeekResumeToken;
+
+  try{ if(_cancelSafariSeekResume) _cancelSafariSeekResume(); }catch(e){}
+  if(!useSafariWarmup || !shouldResume){
+    try{ audio.currentTime = mediaTarget; }catch(e){}
+    return;
+  }
+
+  const loadToken = _mediaLoadToken;
+  const prerollSeconds = Math.min(SAFARI_SEEK_PREROLL_SECONDS, mediaTarget);
+  const seekTarget = Math.max(0, mediaTarget - prerollSeconds);
+  const previousMuted = !!audio.muted;
+  let finished = false;
+  let resumeStarted = false;
+  let readinessTimeoutId = null;
+  let gateTimeoutId = null;
+  let gateRafId = null;
+  _safariSeekResumePending = true;
+
+  const gainGate = (audioSourceGain && audioContext) ? audioSourceGain : null;
+
+  const silenceOutput = ()=>{
+    if(gainGate){
+      try{
+        const now = audioContext.currentTime;
+        gainGate.gain.cancelScheduledValues(now);
+        gainGate.gain.setValueAtTime(0, now);
+      }catch(e){}
+    }else{
+      try{ audio.muted = true; }catch(e){}
+    }
+  };
+  const restoreOutput = ()=>{
+    if(gainGate){
+      try{
+        const now = audioContext.currentTime;
+        gainGate.gain.cancelScheduledValues(now);
+        gainGate.gain.setValueAtTime(_getPlayerVolume(), now);
+      }catch(e){}
+    }else{
+      try{ audio.muted = previousMuted; }catch(e){}
+    }
+  };
+  const clearReadiness = ()=>{
+    try{ audio.removeEventListener('seeked', onReady); }catch(e){}
+    try{ audio.removeEventListener('canplay', onReady); }catch(e){}
+    if(readinessTimeoutId){ clearTimeout(readinessTimeoutId); readinessTimeoutId = null; }
+  };
+  const cleanup = ()=>{
+    clearReadiness();
+    if(gateTimeoutId){ clearTimeout(gateTimeoutId); gateTimeoutId = null; }
+    if(gateRafId){ cancelAnimationFrame(gateRafId); gateRafId = null; }
+    if(_cancelSafariSeekResume === cancel) _cancelSafariSeekResume = null;
+  };
+  const cancel = ()=>{
+    if(finished) return;
+    finished = true;
+    cleanup();
+    restoreOutput();
+    _safariSeekResumePending = false;
+  };
+  const finish = ()=>{
+    if(finished) return;
+    finished = true;
+    cleanup();
+    restoreOutput();
+    if(loadToken !== _mediaLoadToken || resumeToken !== _safariSeekResumeToken) return;
+    _safariSeekResumePending = false;
+    _setPlaybackState(true);
+  };
+  const openGateAfterPreroll = ()=>{
+    if(finished) return;
+    if(loadToken !== _mediaLoadToken || resumeToken !== _safariSeekResumeToken){ cancel(); return; }
+    if(gainGate && audioContext && audioContext.state === 'running'){
+      try{
+        const now = audioContext.currentTime;
+        const openAt = now + prerollSeconds;
+        gainGate.gain.cancelScheduledValues(now);
+        gainGate.gain.setValueAtTime(0, now);
+        gainGate.gain.setValueAtTime(0, openAt);
+        gainGate.gain.linearRampToValueAtTime(_getPlayerVolume(), openAt + 0.012);
+      }catch(e){}
+      gateTimeoutId = setTimeout(finish, Math.max(20, Math.ceil((prerollSeconds + 0.035) * 1000)));
+      return;
+    }
+    // Keep native Safari playback muted until its own media clock reaches the
+    // requested boundary. Unlike WebKit's MediaElementAudioSource path, this
+    // clock stays tied to the decoder even when seek startup latency varies.
+    const waitForNativeTarget = ()=>{
+      if(finished) return;
+      if(loadToken !== _mediaLoadToken || resumeToken !== _safariSeekResumeToken){ cancel(); return; }
+      if((audio.currentTime || 0) >= mediaTarget - 0.015){ finish(); return; }
+      gateRafId = requestAnimationFrame(waitForNativeTarget);
+    };
+    gateRafId = requestAnimationFrame(waitForNativeTarget);
+  };
+  const resume = ()=>{
+    if(finished || resumeStarted) return;
+    resumeStarted = true;
+    clearReadiness();
+    if(loadToken !== _mediaLoadToken){
+      cancel();
+      return;
+    }
+    let playPromise = null;
+    try{ playPromise = audio.play(); }catch(e){
+      cancel();
+      _setPlaybackState(false);
+      return;
+    }
+    let contextPromise = Promise.resolve();
+    try{
+      if(audioContext && audioContext.state !== 'running') contextPromise = audioContext.resume();
+    }catch(e){}
+    Promise.all([Promise.resolve(playPromise), Promise.resolve(contextPromise)]).then(()=>{
+      if(loadToken !== _mediaLoadToken || resumeToken !== _safariSeekResumeToken){ cancel(); return; }
+      openGateAfterPreroll();
+    }).catch(()=>{
+      cancel();
+      _setPlaybackState(false);
+    });
+  };
+  function onReady(){
+    if(loadToken !== _mediaLoadToken){ cancel(); return; }
+    if(audio.seeking || audio.readyState < 3) return;
+    if(Math.abs((audio.currentTime || 0) - seekTarget) > 0.12) return;
+    resume();
+  }
+
+  _cancelSafariSeekResume = cancel;
+  silenceOutput();
+  try{ audio.pause(); }catch(e){}
+  audio.addEventListener('seeked', onReady);
+  audio.addEventListener('canplay', onReady);
+  try{ audio.currentTime = seekTarget; }catch(e){ cancel(); return; }
+  if(!audio.seeking) queueMicrotask(onReady);
+  readinessTimeoutId = setTimeout(resume, 1500);
+}
 
 let recentlyPlayed = []; // Array of track indices (max 20)
 const MAX_RECENT = 20;
@@ -990,8 +1315,14 @@ try{
       try{ if(audio && audio.src) showPreloadToast("Preloading... This shouldn't take long."); }catch(e){}
     });
     audio.addEventListener('canplay', ()=>{ try{ hidePreloadToast(); }catch(e){} });
-    audio.addEventListener('playing', ()=>{ try{ hidePreloadToast(); }catch(e){} });
-    audio.addEventListener('error', ()=>{ try{ hidePreloadToast(); }catch(e){} });
+    audio.addEventListener('playing', ()=>{
+      try{ hidePreloadToast(); }catch(e){}
+      try{ if(!_mediaLoadPending && !webPlaying) _setPlaybackState(true); }catch(e){}
+    });
+    audio.addEventListener('error', ()=>{
+      try{ hidePreloadToast(); }catch(e){}
+      try{ if(!webPlaying) _setPlaybackState(false); }catch(e){}
+    });
   }
 }catch(e){}
 
@@ -1393,7 +1724,7 @@ let shuffleForward = [];
 // Seamless WebAudio loop support disabled. Keeping no-op stubs so we can re-enable later if requested.
 let audioCtx = null;
 const bufferCache = new Map();
-const MAX_CACHED_BUFFERS = 10;
+const MAX_CACHED_BUFFERS = 3;
 const bufferCacheOrder = []; // LRU tracking for cache eviction
 let webSource = null;
 let webGain = null;
@@ -1409,7 +1740,6 @@ let loopScheduler = {
   next: null,
   active: false
 };
-let nextPreloadedIndex = null;
 let nextSwitching = false;
 
 // Smooth playhead interpolation for <audio> element (non-WebAudio mode)
@@ -1499,31 +1829,6 @@ async function decodeFile(file){
   }
 }
 
-function preloadNextTrack(){
-  try{
-    const nextIdx = computeNextIndexForAuto();
-    if(nextIdx!==null && nextIdx!==undefined){
-      nextPreloadedIndex = nextIdx;
-      const file = tracks[nextIdx] ? _audioFile(tracks[nextIdx].file) : null;
-      if(file && !bufferCache.has(file)){
-        decodeFile(file).catch(()=>{});
-      }
-    }
-    
-    // Also preload previous track for instant back navigation
-    try{
-      const prevIdx = isShuffling ? 
-        (shuffleHistory && shuffleHistory.length ? shuffleHistory[shuffleHistory.length - 1] : null) : 
-        findNextAllowedIndex(index, -1);
-      if(prevIdx !== null && prevIdx !== undefined && prevIdx !== index){
-        const prevFile = tracks[prevIdx] ? _audioFile(tracks[prevIdx].file) : null;
-        if(prevFile && !bufferCache.has(prevFile)){
-          decodeFile(prevFile).catch(()=>{});
-        }
-      }
-    }catch(e){}
-  }catch(e){}
-}
 // No-op stop
 function stopWebLoop(){
   // stop scheduler sources and clear timers
@@ -1538,7 +1843,7 @@ function stopWebLoop(){
   webFile = null;
   webOffsetValid = false;
   // Restore the audio element's WebAudio gain so non-loop playback is audible again.
-  try{ if(audioSourceGain) audioSourceGain.gain.setValueAtTime(1, audioCtx ? audioCtx.currentTime : 0); }catch(e){}
+  try{ if(audioSourceGain) audioSourceGain.gain.setValueAtTime(_getPlayerVolume(), audioCtx ? audioCtx.currentTime : 0); }catch(e){}
   try{ if(audio){ audio.muted = false; audio.loop = false; } }catch(e){}
 }
 function getWebCurrentTime(){
@@ -1667,7 +1972,7 @@ function switchToWebLoop(file, offset=0){
     // Custom loop start: skip the intro on tracks that define one.
     const _loopStartSec = _getTrackLoopStart(tracks && tracks[index]);
     if(_loopStartSec > 0){
-      src.loopStart = _loopStartSec;
+      src.loopStart = _catalogTimeToMediaTime(_loopStartSec, buf.duration);
       src.loopEnd = buf.duration; // explicit end so loopStart is respected
     }
     const gain = audioCtx.createGain();
@@ -1757,16 +2062,16 @@ function setPreloading(active){
       try{
         if(webPlaying && webSource && webSource.buffer){
           const d = webSource.buffer.duration;
-          if(mRem) mRem.textContent = (isFinite(d)? fmt(d) : '');
-          if(miniRem) miniRem.textContent = (isFinite(d)? fmt(d) : '');
           const cur = getWebCurrentTime();
-          if(mCur) mCur.textContent = fmt(cur);
-          if(miniCur) miniCur.textContent = fmt(cur);
+          _updateTimingUi(cur, d);
           } else {
             // If no track is loaded, keep the UI in the "No song playing" state.
             const hasSrc = !!(audio && audio.src);
-            if(mRem) mRem.textContent = hasSrc ? '' : fmt(0);
-            if(miniRem) miniRem.textContent = hasSrc ? '' : fmt(0);
+            if(hasSrc) _updateTimingUi(audio.currentTime || 0, audio.duration);
+            else {
+              if(mRem) mRem.textContent = fmt(0);
+              if(miniRem) miniRem.textContent = fmt(0);
+            }
             try{
               if(hasSrc){
                 const t = tracks[index];
@@ -2552,10 +2857,31 @@ function preloadAllDurations(){
   };
   setTimeout(()=>{for(let i=0;i<Math.min(CONCURRENCY,tracks.length);i++) loadOne(nextIdx++);},1000);
 }
+
+let gummyStageColorMap = null;
+
+function getTrackStageAccent(track){
+  if(track && typeof track.accent === 'string' && track.accent.trim()){
+    return track.accent.trim();
+  }
+  if(!gummyStageColorMap){
+    const stageNames = [...new Set((tracks || [])
+      .map(item => String((item && (item.stage || item.title)) || 'track'))
+      .sort((a, b) => a.localeCompare(b)))];
+    gummyStageColorMap = new Map(stageNames.map((stageName, stageIndex)=>{
+      const hue = (342 + (stageIndex * 137.508)) % 360;
+      const lightness = 64 + ((stageIndex % 3) * 4);
+      return [stageName, `hsl(${hue.toFixed(1)}deg 78% ${lightness}%)`];
+    }));
+  }
+  const stageName = String((track && (track.stage || track.title)) || 'track');
+  return gummyStageColorMap.get(stageName) || 'hsl(342deg 78% 64%)';
+}
+
 function renderList(){
   trackListEl.innerHTML = '';
   const listedIndices = getListedTrackIndices();
-  listedIndices.forEach((i)=>{
+  listedIndices.forEach((i, listPosition)=>{
     const baseTrack = tracks[i];
     let displayIndex = i;
     let displayTrack = baseTrack;
@@ -2583,7 +2909,11 @@ function renderList(){
 
     const el = document.createElement('button');
     el.className = 'track';
-    el.innerHTML = `<img src="${encodeURI(displayTrack.image)}" alt="cover"><div class="meta"><div class="title"><span class="title-text">${displayTrack.title}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="sub">${_getDisplayArtist(displayTrack)}</div></div>`;
+    const trackNumber = String(listPosition + 1).padStart(2, '0');
+    const stageLabel = [displayTrack.stage, displayTrack.side ? `Side ${displayTrack.side}` : ''].filter(Boolean).join(' / ');
+    el.style.setProperty('--track-accent', getTrackStageAccent(displayTrack));
+    el.dataset.stage = String(displayTrack.stage || displayTrack.title || 'Track');
+    el.innerHTML = `<span class="track-number" aria-hidden="true">${trackNumber}</span><img src="${encodeURI(displayTrack.image)}" alt=""><div class="meta"><div class="title"><span class="title-text">${escapeHtml(displayTrack.title)}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="track-meta-line"><span class="track-stage">${escapeHtml(stageLabel)}</span><span class="sub">${escapeHtml(_getDisplayArtist(displayTrack))}</span></div></div><span class="track-meter" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;
     if(trackDurations[displayIndex]){
       const durEl=el.querySelector('.track-dur');
       if(durEl) durEl.classList.add('loaded');
@@ -2702,6 +3032,7 @@ function showContextMenu(x, y, trackIndex){
     trackContextMenu.style.left = `${x}px`;
     trackContextMenu.style.top = `${y}px`;
     trackContextMenu.classList.remove('hidden');
+    trackContextMenu.setAttribute('aria-hidden', 'false');
     console.log('Context menu shown');
 
     // Adjust position if menu goes off-screen
@@ -2721,7 +3052,10 @@ function showContextMenu(x, y, trackIndex){
 
 function hideContextMenu(){
   try{
-    if(trackContextMenu) trackContextMenu.classList.add('hidden');
+    if(trackContextMenu){
+      trackContextMenu.classList.add('hidden');
+      trackContextMenu.setAttribute('aria-hidden', 'true');
+    }
     contextMenuTrackIndex = -1;
   }catch(e){}
 }
@@ -2736,17 +3070,23 @@ function loadTrack(i, opts={fade:'cross'}){
   try{ if(_isFloatingShipVariantTrack(t)) _setFloatingShipPreferredSide(t.side, true); }catch(e){}
   // stop any WebAudio playback when loading a new track to avoid overlap
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
-  try{ audio.pause(); }catch(e){}
-  audio.src = encodeURI(_audioFile(t.file));
   // always start from the very beginning when loading a track
   let initialSeek = 0;
   if(_isAirportTrack(t) && typeof pendingAirportSeekSeconds === 'number' && isFinite(pendingAirportSeekSeconds) && pendingAirportSeekSeconds >= 0){
     initialSeek = pendingAirportSeekSeconds;
   }
   pendingAirportSeekSeconds = null;
-  try{ audio.currentTime = initialSeek; }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
-  webOffset = initialSeek;
-  webOffsetValid = initialSeek > 0;
+  // initialSeek is expressed in catalog seconds. Do not store it as a native or
+  // WebAudio offset; the media duration needed for that conversion arrives later.
+  webOffset = 0;
+  webOffsetValid = false;
+  if(_isAirportTrack(t)){
+    const initialSection = _getAirportSectionByTime(initialSeek);
+    activeAirportSectionId = initialSection ? initialSection.id : '';
+  }else{
+    activeAirportSectionId = '';
+  }
+  _beginNativeMediaLoad(_audioFile(t.file), initialSeek);
   // do not pre-decode here to avoid blocking load; decoding happens when play is requested
   trackTitle.classList.add('track-title-main');
   // For Airport tracks, resolve the correct cover for the initial seek position
@@ -2869,14 +3209,41 @@ function loadTrack(i, opts={fade:'cross'}){
   try{ if(shuffleQueue && shuffleQueue.length){ shuffleQueue = shuffleQueue.filter(x=>x!==index); } }catch(e){}
   try{ localStorage.setItem('gb:lastIndex', String(index)); }catch(e){}
   
-  // Aggressively preload next and previous tracks immediately
-  try{ preloadNextTrack(); }catch(e){}
   try{ updateTrackCounter(); }catch(e){}
   try{ _updateFloatingShipVersionUI(index); }catch(e){}
   try{ _updateSeekChapters(t); }catch(e){}
   try{ _applyAirportSectionState(initialSeek, {force:true, crossfade:false}); }catch(e){}
 }
 
+
+async function _playNativeAudioForCurrentLoad(){
+  const token = _mediaLoadToken;
+  let playPromise;
+  try{
+    // Call play immediately so the request remains associated with the user's gesture.
+    // Airport audio stays muted until its deferred initial seek is confirmed.
+    playPromise = audio.play();
+  }catch(e){
+    if(token === _mediaLoadToken) _setPlaybackState(false);
+    console.warn('audio.play failed', e);
+    return false;
+  }
+
+  try{
+    await Promise.all([_mediaLoadReady, playPromise]);
+    if(token !== _mediaLoadToken) return false;
+    if(audio.paused) throw new Error('Playback did not enter the playing state');
+    _setPlaybackState(true);
+    return true;
+  }catch(e){
+    if(token === _mediaLoadToken){
+      try{ audio.pause(); }catch(e2){}
+      _setPlaybackState(false);
+    }
+    if(!e || e.name !== 'AbortError') console.warn('audio.play failed', e);
+    return false;
+  }
+}
 
 async function play(){
   // record history once per track, only when actually playing (not on load/restore)
@@ -2910,15 +3277,9 @@ async function play(){
         if(cached){
           const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
           const started = switchToWebLoop(file, offset);
-          if(started){ 
-            isPlaying = true; 
-            mPlay.textContent='❚❚'; 
-            heroArt.classList.add('playing'); 
-            if(miniPlay) miniPlay.textContent='❚❚'; 
-            if(miniPlayer) miniPlayer.classList.remove('hidden'); 
-            startProgress(); 
-            try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} 
-            return; 
+          if(started){
+            _setPlaybackState(true);
+            return true;
           }
         }
         // not decoded yet — decode first
@@ -2929,43 +3290,23 @@ async function play(){
         if(buf){
           const offset = (webOffsetValid ? webOffset : (audio && audio.currentTime ? audio.currentTime : 0));
           const started = switchToWebLoop(file, offset);
-          if(started){ 
-            isPlaying = true; 
-            mPlay.textContent='❚❚'; 
-            heroArt.classList.add('playing'); 
-            if(miniPlay) miniPlay.textContent='❚❚'; 
-            if(miniPlayer) miniPlayer.classList.remove('hidden'); 
-            startProgress(); 
-            try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){} 
-            return; 
+          if(started){
+            _setPlaybackState(true);
+            return true;
           }
         }
       }catch(e){ setPreloading(false); console.warn('decode/play failed, using fallback', e); }
       // fallback to audio element
-      try{ await audio.play(); }catch(e){}
-      isPlaying=true; 
-      mPlay.textContent='❚❚'; 
-      heroArt.classList.add('playing'); 
-      if(miniPlay) miniPlay.textContent='❚❚'; 
-      if(miniPlayer) miniPlayer.classList.remove('hidden'); 
-      startProgress();
-      try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
-      return;
+      return _playNativeAudioForCurrentLoad();
     }
   }
   // Non-loop mode: stop any web loop and use <audio>
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
-  try{ await audio.play(); }catch(e){ console.warn('audio.play failed', e); }
-  isPlaying=true; 
-  mPlay.textContent='❚❚'; 
-  heroArt.classList.add('playing'); 
-  if(miniPlay) miniPlay.textContent='❚❚'; 
-  if(miniPlayer) miniPlayer.classList.remove('hidden'); 
-  startProgress();
-  try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+  return _playNativeAudioForCurrentLoad();
 }
 
 function pause(){
+  try{ if(_cancelSafariSeekResume) _cancelSafariSeekResume(); }catch(e){}
   // If WebAudio loop is active, capture its current position and stop it so we can resume later
   try{
     if(webPlaying){
@@ -2975,12 +3316,7 @@ function pause(){
     }
   }catch(e){}
   try{ audio.pause(); }catch(e){}
-  isPlaying=false;
-  mPlay.textContent='▶';
-  heroArt.classList.remove('playing');
-  if(miniPlay) miniPlay.textContent='▶';
-  stopProgress();
-  try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
+  _setPlaybackState(false);
 }
 
 function setSeekPercent(p){
@@ -3010,15 +3346,9 @@ function startProgress(){
           track: tracks[index],
         });
       }catch(e){}
-      const p = (cur/dur)*100;
-      if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
-      setSeekPercent(p);
-      if(mCur) mCur.textContent = fmt(cur);
-      if(miniCur) miniCur.textContent = fmt(cur);
-      if(mRem) mRem.textContent = (isFinite(dur)? fmt(dur) : '');
-      if(miniRem) miniRem.textContent = (isFinite(dur)? fmt(dur) : '');
+      _updateTimingUi(cur, dur);
       try{ updateMediaSessionPosition(false); }catch(e){}
-      try{ _applyAirportSectionState(cur, {force:false, crossfade:true}); }catch(e){}
+      try{ _applyAirportSectionState(_mediaTimeToCatalogTime(cur, dur), {force:false, crossfade:true}); }catch(e){}
     }
     progressRaf = requestAnimationFrame(step);
   };
@@ -3032,8 +3362,15 @@ function stopProgress(){
   try{ stopBeatPulse(); }catch(e){}
 }
 
+function _togglePlayback(){
+  // Native play() can succeed a moment before the async readiness path updates
+  // isPlaying. Treat the media element itself as authoritative in that window.
+  const actuallyPlaying = isPlaying || webPlaying || !!(audio && !audio.paused);
+  actuallyPlaying ? pause() : play();
+}
+
 // modal controls only (main player removed)
-mPlay.addEventListener('click',()=>{isPlaying?pause():play();});
+mPlay.addEventListener('click', _togglePlayback);
 mPrev.addEventListener('click',()=>{skip(-1)});
 mNext.addEventListener('click',()=>{skip(1)});
 
@@ -3138,7 +3475,7 @@ function setLoopState(mode){
         const pos = getWebCurrentTime();
         stopWebLoop();
         try{ audio.currentTime = pos; }catch(e){}
-        if(isPlaying){ try{ audio.play(); }catch(e){} }
+        if(isPlaying){ try{ _playNativeAudioForCurrentLoad(); }catch(e){} }
       }
     }catch(e){}
   }
@@ -3156,7 +3493,7 @@ function setLoopState(mode){
           try{
             const ok = switchToWebLoop(file, audio.currentTime || 0);
             if(ok){
-              try{ mPlay.textContent='❚❚'; if(miniPlay) miniPlay.textContent='❚❚'; heroArt.classList.add('playing'); startProgress(); }catch(e){}
+              _setPlaybackState(true);
             }
           }catch(e){}
         } else {
@@ -3241,57 +3578,10 @@ function skip(dir){
   // reset saved web offset when changing tracks
   webOffsetValid = false;
   const targetPlaybackIndex = _resolveTrackIndexForPlayback(index);
-  const targetFile = tracks[targetPlaybackIndex] && tracks[targetPlaybackIndex].file;
-  const isPreloaded = targetFile && bufferCache.has(targetFile);
-  
+
   // Stop current WebAudio playback
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
-  
-  // If next track is preloaded and we're in a playing state, do instant switch
-  if(isPreloaded && isPlaying){
-    try{
-      // Update all UI first via loadTrack
-      if(!modal.classList.contains('hidden')){
-        loadTrack(targetPlaybackIndex, {fade:'cross'});
-      } else {
-        loadTrack(targetPlaybackIndex, {fade:'in'});
-      }
-      
-      // Now immediately start playback
-      const loopActive = loopMode === 'one';
-      if(loopActive){
-        // Use WebAudio for seamless loop
-        switchToWebLoop(tracks[index].file, 0);
-        isPlaying = true;
-        mPlay.textContent='❚❚';
-        if(miniPlay) miniPlay.textContent='❚❚';
-        heroArt.classList.add('playing');
-        startProgress();
-      } else {
-        // Non-loop: use audio element which loadTrack already set up
-        audio.play().then(()=>{
-          isPlaying = true;
-          mPlay.textContent='❚❚';
-          if(miniPlay) miniPlay.textContent='❚❚';
-          heroArt.classList.add('playing');
-          if(miniPlayer) miniPlayer.classList.remove('hidden');
-          startProgress();
-          try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
-        }).catch((e)=>{
-          console.warn('instant play failed', e);
-          // If autoplay fails, still update UI but paused
-          isPlaying = false;
-          mPlay.textContent='▶';
-          if(miniPlay) miniPlay.textContent='▶';
-        });
-      }
-      
-      try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
-      return;
-    }catch(e){ console.warn('instant switch failed, falling back', e); }
-  }
-  
-  // Standard load path when not preloaded
+
   if(!modal.classList.contains('hidden')){
     loadTrack(targetPlaybackIndex, {fade:'cross'});
   } else {
@@ -3303,12 +3593,15 @@ function skip(dir){
 function clearPlaybackToNoSong(){
   if(_clearingNoSong) return;
   _clearingNoSong = true;
+  try{ if(_cancelMediaPreparation) _cancelMediaPreparation(); }catch(e){}
+  _mediaLoadToken++;
+  _mediaLoadPending = false;
+  _mediaLoadSource = '';
   try{ stopProgress(); }catch(e){}
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
   try{ audio.pause(); }catch(e){}
   try{ audio.removeAttribute('src'); audio.load(); }catch(e){}
-  isPlaying = false;
-  try{ mPlay.textContent = '▶'; if(miniPlay) miniPlay.textContent='▶'; }catch(e){}
+  _setPlaybackState(false);
   // set UI to no-song
   try{
     if(miniPlayer){ miniPlayer.classList.add('no-song'); }
@@ -3386,17 +3679,8 @@ audio.addEventListener('timeupdate',()=>{
   try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
   const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : getSmoothCurrentTime();
   if(dur){
-    const p = (cur/dur)*100;
-    // modal times
-    if(mSeek) mSeek.value = p;
-    if(miniSeek) miniSeek.value = p;
-    setSeekPercent(p);
-    if(mCur) mCur.textContent = fmt(cur);
-    // main player shows total duration; mini shows total as well
-    if(mRem) mRem.textContent = (isFinite(dur) ? fmt(dur) : '');
-    if(miniCur) miniCur.textContent = fmt(cur);
-    if(miniRem) miniRem.textContent = (isFinite(dur) ? fmt(dur) : '');
-    try{ _applyAirportSectionState(cur, {force:false, crossfade:true}); }catch(e){}
+    _updateTimingUi(cur, dur);
+    try{ _applyAirportSectionState(_mediaTimeToCatalogTime(cur, dur), {force:false, crossfade:true}); }catch(e){}
   }
 });
 
@@ -3406,6 +3690,7 @@ try{
   audio.addEventListener('seeked', ()=>{ _audioSeeking = false; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
   audio.addEventListener('pause', ()=>{
     try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = 0; }catch(e){}
+    try{ if(!webPlaying && !_safariSeekResumePending) _setPlaybackState(false); }catch(e){}
     try{
       // Fallback for browsers where ended sequencing is inconsistent:
       // if media is ended and autoplay is off, force no-song reset.
@@ -3413,7 +3698,7 @@ try{
       const cur = Number(audio && audio.currentTime);
       const nearEnd = Number.isFinite(dur) && dur > 0 && Number.isFinite(cur) && cur >= Math.max(0, dur - 0.05);
       const modalOpen = !!(modal && !modal.classList.contains('hidden'));
-      if(audio && (audio.ended || nearEnd) && !isAutoplayEnabled() && loopMode !== 'one' && !modalOpen){
+      if(!_mediaLoadPending && audio && (audio.ended || nearEnd) && !isAutoplayEnabled() && loopMode !== 'one' && !modalOpen){
         clearPlaybackToNoSong();
       }
     }catch(e){}
@@ -3428,13 +3713,7 @@ audio.addEventListener('loadedmetadata', ()=>{
   try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
   const cur = (webPlaying && webSource && webSource.buffer) ? getWebCurrentTime() : getSmoothCurrentTime();
   if(dur && isFinite(dur)){
-    const p = (cur/dur)*100 || 0;
-    if(mSeek) mSeek.value = p; if(miniSeek) miniSeek.value = p;
-    setSeekPercent(p);
-    if(mCur) mCur.textContent = fmt(cur);
-    mRem.textContent = fmt(dur);
-    if(miniCur) miniCur.textContent = fmt(cur);
-    if(miniRem) miniRem.textContent = fmt(dur);
+    _updateTimingUi(cur, dur);
   } else {
     if(mSeek) mSeek.value = 0; if(miniSeek) miniSeek.value = 0;
     setSeekPercent(0);
@@ -3452,7 +3731,7 @@ mSeek.addEventListener('input',()=>{
       if(webPlaying && webSource && webSource.buffer){
         const newOffset = (percent/100) * webSource.buffer.duration;
         switchToWebLoop(tracks[index].file, newOffset);
-        try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+        try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, webSource.buffer.duration), {force:true, crossfade:true}); }catch(e){}
       return;
     }
   }catch(e){}
@@ -3470,7 +3749,7 @@ mSeek.addEventListener('input',()=>{
         webOffsetValid = true;
         try{ if(audio) audio.currentTime = newOffset; }catch(e){}
         try{ _audioTimeBase = newOffset; _audioTimeStamp = _nowMs(); }catch(e){}
-        try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+        try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, dur), {force:true, crossfade:true}); }catch(e){}
         return;
       }
     }
@@ -3480,7 +3759,7 @@ mSeek.addEventListener('input',()=>{
   if(audio.duration){
     const newOffset = (percent/100)*audio.duration;
     audio.currentTime = newOffset;
-    try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+    try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, audio.duration), {force:true, crossfade:true}); }catch(e){}
   }
   try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
 });
@@ -3492,7 +3771,7 @@ if(miniSeek){
         if(webPlaying && webSource && webSource.buffer){
           const newOffset = (percent/100) * webSource.buffer.duration;
           switchToWebLoop(tracks[index].file, newOffset);
-          try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+          try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, webSource.buffer.duration), {force:true, crossfade:true}); }catch(e){}
         return;
       }
     }catch(e){}
@@ -3509,7 +3788,7 @@ if(miniSeek){
           webOffsetValid = true;
           try{ if(audio) audio.currentTime = newOffset; }catch(e){}
           try{ _audioTimeBase = newOffset; _audioTimeStamp = _nowMs(); }catch(e){}
-          try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+          try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, dur), {force:true, crossfade:true}); }catch(e){}
           return;
         }
       }
@@ -3519,23 +3798,55 @@ if(miniSeek){
     if(audio.duration){
       const newOffset = (percent/100)*audio.duration;
       audio.currentTime = newOffset;
-      try{ _applyAirportSectionState(newOffset, {force:true, crossfade:true}); }catch(e){}
+      try{ _applyAirportSectionState(_mediaTimeToCatalogTime(newOffset, audio.duration), {force:true, crossfade:true}); }catch(e){}
     }
     try{ if(!webPlaying){ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); } }catch(e){}
   });
 }
 
 const mVolume = document.getElementById('mVolume');
-if(mVolume){
-  audio.volume = parseFloat(mVolume.value);
-  mVolume.addEventListener('input',()=>{ audio.volume = mVolume.value; try{ if(webGain) webGain.gain.value = mVolume.value; }catch(e){} });
+function _getPlayerVolume(){
+  try{
+    const value = Number(mVolume && mVolume.value);
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.9;
+  }catch(e){ return 0.9; }
 }
-if(mVolume){ mVolume.addEventListener('input',()=>{ try{ localStorage.setItem('gb:volume', String(mVolume.value)) }catch(e){} }); }
+
+function _setPlayerVolume(value, persist=false){
+  const volume = Math.max(0, Math.min(1, Number(value) || 0));
+  // Once routed through Web Audio, keep the element at unity and use exactly
+  // one gain stage. Otherwise desktop browsers would apply the volume twice.
+  try{ audio.volume = audioSourceGain ? 1 : volume; }catch(e){}
+  try{
+    if(audioSourceGain && !webPlaying){
+      const when = audioContext ? audioContext.currentTime : 0;
+      audioSourceGain.gain.setValueAtTime(volume, when);
+    }
+  }catch(e){}
+  try{
+    if(webGain){
+      const when = audioCtx ? audioCtx.currentTime : 0;
+      webGain.gain.setValueAtTime(volume, when);
+    }
+  }catch(e){}
+  if(persist){ try{ localStorage.setItem('gb:volume', String(volume)); }catch(e){} }
+}
+
+if(mVolume){
+  _setPlayerVolume(mVolume.value);
+  mVolume.addEventListener('input',()=>{
+    // Safari may expose a locked HTMLMediaElement volume. Route through a Web
+    // Audio gain node as well, initialized from this user gesture.
+    try{ initAudioContext(); }catch(e){}
+    try{ if(audioContext && audioContext.state === 'suspended') audioContext.resume().catch(()=>{}); }catch(e){}
+    _setPlayerVolume(mVolume.value, true);
+  });
+}
 
 audio.addEventListener('ended',()=>{
   if(loopMode === 'one'){
     const _ls = _getTrackLoopStart(tracks && tracks[index]);
-    try{ audio.currentTime = _ls || 0; }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
+    try{ audio.currentTime = _catalogTimeToMediaTime(_ls || 0, audio.duration); }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
     play();
     return;
   }
@@ -3545,9 +3856,7 @@ audio.addEventListener('ended',()=>{
     const modalOpen = !!(modal && !modal.classList.contains('hidden'));
     if(modalOpen){
       // In fullscreen, keep current track UI visible; just stop playback state.
-      isPlaying = false;
-      try{ if(mPlay) mPlay.textContent = '▶'; if(miniPlay) miniPlay.textContent = '▶'; }catch(e){}
-      try{ if(heroArt) heroArt.classList.remove('playing'); }catch(e){}
+      _setPlaybackState(false);
       try{ updateTrackActiveState(); }catch(e){}
       try{ updateMediaSessionPlaybackState(); }catch(e){}
       return;
@@ -3620,7 +3929,7 @@ if(mAutoplay)    mAutoplay.addEventListener('click',   ()=>{ toggleAutoplay(); }
 if(miniAutoplay) miniAutoplay.addEventListener('click',()=>{ toggleAutoplay(); });
 
 // mini player wiring: only the buttons toggle playback; clicking cover/title opens modal
-if(miniPlay){miniPlay.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniPlayer && miniPlayer.classList.contains('no-song')){ return; } }catch(e){} isPlaying?pause():play();});}
+if(miniPlay){miniPlay.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniPlayer && miniPlayer.classList.contains('no-song')){ return; } }catch(e){} _togglePlayback();});}
 if(miniPrev){miniPrev.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniPrev.disabled) return; }catch(e){} skip(-1)});}
 if(miniNext){miniNext.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniNext.disabled) return; }catch(e){} skip(1)});}
 if(miniCover){miniCover.addEventListener('click',(ev)=>{ev.stopPropagation(); try{ if(miniPlayer && miniPlayer.classList.contains('no-song')) return; }catch(e){} openModal(index);});}
@@ -4002,7 +4311,7 @@ document.addEventListener('keydown',(e)=>{
   try{ if(!audio || !audio.src) return; }catch(e){}
   if(e.code === 'Space' || e.key === ' '){
     e.preventDefault();
-    isPlaying?pause():play();
+    _togglePlayback();
     return;
   }
   if(e.code === 'ArrowRight'){
@@ -4068,7 +4377,6 @@ function openModal(i){
       loadTrack(i, {fade:'in'});
       if(autoplay){
         play();
-        mPlay.textContent = '❚❚';
       } else {
         mPlay.textContent = '▶';
       }
@@ -4091,7 +4399,6 @@ function openModal(i){
       loadTrack(i, {fade:'cross'});
       if(autoplay){
         play();
-        mPlay.textContent='❚❚';
       } else {
         mPlay.textContent='▶';
       }
@@ -4235,6 +4542,13 @@ function startBeatPulse(){
     try{ stopBeatPulse(); }catch(e){}
     return;
   }
+  // Ordinary Safari playback stays on the native media pipeline. Routing the
+  // element through MediaElementAudioSourceNode makes post-seek audio timing
+  // intermittent in WebKit. The explicit waveform view may still opt in.
+  if(isSafari() && !waveformActive){
+    try{ stopBeatPulse(); }catch(e){}
+    return;
+  }
   if(beatRaf) return;
   try{ initAudioContext(); }catch(e){}
   if(!analyser) return;
@@ -4374,9 +4688,10 @@ function initAudioContext(){
       if(!audioSource){
         audioSource = audioContext.createMediaElementSource(audio);
         audioSourceGain = audioContext.createGain();
-        audioSourceGain.gain.value = webPlaying ? 0 : 1;
+        audioSourceGain.gain.value = webPlaying ? 0 : _getPlayerVolume();
         audioSource.connect(audioSourceGain);
         audioSourceGain.connect(analyser);
+        try{ audio.volume = 1; }catch(e){}
       }
 
       // Ensure analyser output is connected exactly once.
