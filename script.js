@@ -62,6 +62,7 @@ const downloadAllLabel = document.getElementById('downloadAllLabel');
 const viewBtn = document.getElementById('viewBtn');
 const viewDropdown = document.getElementById('viewDropdown');
 const searchInput = document.getElementById('searchInput');
+const layoutSwitcher = document.getElementById('layoutSwitcher');
 const preloadToast = document.getElementById('preloadToast');
 const preloadToastText = document.getElementById('preloadToastText');
 const keyboardHint = document.getElementById('keyboardHint');
@@ -1021,6 +1022,7 @@ let customExcludePendingFile = '';
 let customExcludeSearchQuery = '';
 let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
+let currentLayoutMode = 'grid';
 let progressRaf = null;
 let searchQuery = '';
 let floatingShipPreferredSide = FLOATING_SHIP_SIDE_ORIGINAL;
@@ -1289,6 +1291,7 @@ let recentlyPlayed = []; // Array of track indices (max 20)
 const MAX_RECENT = 20;
 const REDUCE_ANIMATIONS_KEY = 'gb:reduceAnimations';
 const LITE_MODE_KEY = 'gb:liteMode';
+const LAYOUT_MODE_KEY = 'gb:layoutMode';
 const CUSTOM_EXCLUSIONS_KEY = 'gb:customExclusions';
 const CUSTOM_EXCLUSIONS_NAME_KEY = 'gb:customExclusionsName';
 const CUSTOM_FILTERS_KEY = 'gb:customFilters';
@@ -1555,6 +1558,25 @@ function syncViewDropdownPressed(){
       const v = d.dataset.value;
       d.setAttribute('aria-pressed', v === currentViewFilter ? 'true' : 'false');
     });
+  }catch(e){}
+}
+
+function setLayoutMode(mode, persist = false){
+  const nextMode = mode === 'list' ? 'list' : 'grid';
+  currentLayoutMode = nextMode;
+  try{
+    if(trackListEl){
+      trackListEl.classList.toggle('layout-list', nextMode === 'list');
+      trackListEl.dataset.layout = nextMode;
+    }
+    if(layoutSwitcher){
+      layoutSwitcher.querySelectorAll('[data-layout]').forEach(option=>{
+        const active = option.dataset.layout === nextMode;
+        option.classList.toggle('active', active);
+        option.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+    if(persist) localStorage.setItem(LAYOUT_MODE_KEY, nextMode);
   }catch(e){}
 }
 
@@ -2132,6 +2154,21 @@ async function init(){
       });
     }
   }catch(e){}
+
+  // Restore and wire the catalog layout before the first track render.
+  try{
+    const savedLayout = localStorage.getItem(LAYOUT_MODE_KEY);
+    setLayoutMode(savedLayout === 'list' ? 'list' : 'grid');
+    if(layoutSwitcher){
+      layoutSwitcher.addEventListener('click', (ev)=>{
+        const option = ev.target.closest('[data-layout]');
+        if(!option || !layoutSwitcher.contains(option)) return;
+        setLayoutMode(option.dataset.layout, true);
+      });
+    }
+  }catch(e){
+    setLayoutMode('grid');
+  }
 
   // restore settings & custom groups
   try{

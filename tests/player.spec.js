@@ -28,9 +28,13 @@ async function openPlayer(page, path = '/') {
   await expect(page.locator('#trackList .track').first()).toBeVisible();
 }
 
-async function chooseView(page, value) {
+async function chooseFilter(page, value) {
   await page.locator('#viewBtn').click();
   await page.locator(`#viewDropdown [data-value="${value}"]`).click();
+}
+
+async function chooseLayout(page, value) {
+  await page.locator(`#layoutSwitcher [data-layout="${value}"]`).click();
 }
 
 test('loads the catalog and supports search and built-in filters', async ({ page }) => {
@@ -39,6 +43,7 @@ test('loads the catalog and supports search and built-in filters', async ({ page
 
   await expect(cards).toHaveCount(expectedCount('all'));
   await expect(page.locator('.hero-kicker')).toHaveText('Now broadcasting');
+  await expect(page.locator('#viewBtn')).toContainText('Filter');
   const heroTitleButtonGap = await page.locator('.hero-info .title-row').evaluate((row) => {
     const title = row.querySelector('h1');
     const button = row.querySelector('.copy-link-btn');
@@ -66,9 +71,75 @@ test('loads the catalog and supports search and built-in filters', async ({ page
   await page.locator('#searchInput').fill('');
 
   for (const filter of ['drums-include', 'drums-only', 'exclude', 'only', 'all']) {
-    await chooseView(page, filter);
+    await chooseFilter(page, filter);
     await expect(cards).toHaveCount(expectedCount(filter));
   }
+});
+
+test('switches between the grid and compact list without changing catalog behavior', async ({ page }) => {
+  await openPlayer(page);
+  const cards = page.locator('#trackList .track');
+  const gridOption = page.locator('#layoutSwitcher [data-layout="grid"]');
+  const listOption = page.locator('#layoutSwitcher [data-layout="list"]');
+
+  await expect(gridOption).toHaveAttribute('aria-pressed', 'true');
+  await expect(listOption).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#trackList')).toHaveAttribute('data-layout', 'grid');
+
+  await chooseLayout(page, 'list');
+  await expect(page.locator('#trackList')).toHaveClass(/layout-list/);
+  await expect(gridOption).toHaveAttribute('aria-pressed', 'false');
+  await expect(listOption).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:layoutMode'))).toBe('list');
+
+  const listGeometry = await cards.evaluateAll((elements) => elements.slice(0, 5).map((element) => {
+    const rect = element.getBoundingClientRect();
+    const image = element.querySelector('img').getBoundingClientRect();
+    const numberPosition = getComputedStyle(element.querySelector('.track-number')).position;
+    return { top: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height), imageWidth: Math.round(image.width), numberPosition };
+  }));
+  expect(new Set(listGeometry.map(({ top }) => top)).size).toBe(listGeometry.length);
+  expect(new Set(listGeometry.map(({ width }) => width)).size).toBe(1);
+  expect(listGeometry[0].height).toBeLessThanOrEqual(72);
+  expect(listGeometry[0].imageWidth).toBe(48);
+  expect(listGeometry[0].numberPosition).toBe('static');
+  await expect(cards.first().locator('.track-stage')).not.toHaveText('');
+  await expect(cards.first().locator('.sub')).not.toHaveText('');
+  await expect(cards.first().locator('.track-dur')).not.toHaveText('');
+
+  await chooseFilter(page, 'drums-include');
+  await expect(cards).toHaveCount(expectedCount('drums-include'));
+  await expect(page.locator('#trackList')).toHaveClass(/layout-list/);
+  await page.locator('#searchInput').fill('Tutorial');
+  await expect(cards).toHaveCount(1);
+
+  await chooseLayout(page, 'grid');
+  await expect(page.locator('#trackList')).not.toHaveClass(/layout-list/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:layoutMode'))).toBe('grid');
+});
+
+test('keeps the list toolbar and rows compact on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('gb:layoutMode', 'list'));
+  await openPlayer(page);
+
+  const mobileLayout = await page.evaluate(() => {
+    const search = document.getElementById('searchInput').getBoundingClientRect();
+    const duration = document.getElementById('ostDurationEl').getBoundingClientRect();
+    const switcher = document.getElementById('layoutSwitcher').getBoundingClientRect();
+    const card = document.querySelector('#trackList .track').getBoundingClientRect();
+    return {
+      searchBottom: Math.round(search.bottom),
+      durationCenter: Math.round(duration.top + (duration.height / 2)),
+      switcherTop: Math.round(switcher.top),
+      switcherCenter: Math.round(switcher.top + (switcher.height / 2)),
+      cardHeight: Math.round(card.height),
+    };
+  });
+  expect(mobileLayout.switcherTop).toBeGreaterThanOrEqual(mobileLayout.searchBottom);
+  expect(Math.abs(mobileLayout.switcherCenter - mobileLayout.durationCenter)).toBeLessThanOrEqual(2);
+  expect(mobileLayout.cardHeight).toBeLessThanOrEqual(70);
+  await expect(page.locator('#layoutSwitcher [data-layout="list"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('keeps the playing-card hover lift and uses the gummy timeline styling', async ({ page }) => {
@@ -338,15 +409,21 @@ test('downloads an individual M4A track', async ({ page }) => {
 
 test('opens and closes the custom track context menu', async ({ page }) => {
   await openPlayer(page);
+  await chooseLayout(page, 'list');
 
   const tutorialIndex = tracks.findIndex((track) => track.stage === 'Tutorial' && track.side === 'A');
-  await page.locator(`.track[data-track-index="${tutorialIndex}"]`).click({ button: 'right' });
+  const tutorialCard = page.locator(`.track[data-track-index="${tutorialIndex}"]`);
+  await tutorialCard.click({ button: 'right' });
   await expect(page.locator('#trackContextMenu')).toHaveAttribute('aria-hidden', 'false');
   await expect(page.locator('#trackContextMenu [data-action="play"]')).toHaveText(/Play Now/);
 
   await page.locator('#trackContextMenu [data-action="play"]').click();
   await expect(page.locator('#trackContextMenu')).toHaveAttribute('aria-hidden', 'true');
   await expect(page.locator('#trackTitle')).toHaveText('Tutorial');
+
+  await tutorialCard.locator('img').click({ force: true });
+  await expect(page.locator('#modal')).not.toHaveClass(/hidden/);
+  await page.keyboard.press('Escape');
 });
 
 test('supports keyboard controls and important dialogs', async ({ page }) => {
@@ -359,6 +436,18 @@ test('supports keyboard controls and important dialogs', async ({ page }) => {
 
   await page.keyboard.press('f');
   await expect(page.locator('#modal')).not.toHaveClass(/hidden/);
+  const fullscreenBackground = await page.locator('#modal').evaluate((element) => {
+    const artStyle = getComputedStyle(element.querySelector('.modal-bg'));
+    const patternStyle = getComputedStyle(element, '::before');
+    return {
+      filter: artStyle.filter,
+      patternImage: patternStyle.backgroundImage,
+      patternSize: patternStyle.backgroundSize,
+    };
+  });
+  expect(fullscreenBackground.filter).toContain('blur(12px)');
+  expect(fullscreenBackground.patternImage).toContain('radial-gradient');
+  expect(fullscreenBackground.patternSize).toContain('18px 18px');
   await page.keyboard.press('Escape');
   await expect(page.locator('#modal')).toHaveClass(/hidden/);
 
@@ -390,17 +479,20 @@ test('persists volume changes through the unified audio gain control', async ({ 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:volume'))).toBe('0.35');
 });
 
-test('restores persisted visual settings and view preference', async ({ page }) => {
+test('restores persisted visual settings, filter, and layout preferences', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('gb:reduceAnimations', '1');
     localStorage.setItem('gb:liteMode', '1');
     localStorage.setItem('gb:viewFilter', 'drums-only');
+    localStorage.setItem('gb:layoutMode', 'list');
   });
 
   await openPlayer(page);
   await expect(page.locator('body')).toHaveClass(/reduce-animations/);
   await expect(page.locator('body')).toHaveClass(/lite-mode/);
   await expect(page.locator('#trackList .track')).toHaveCount(expectedCount('drums-only'));
+  await expect(page.locator('#trackList')).toHaveClass(/layout-list/);
+  await expect(page.locator('#layoutSwitcher [data-layout="list"]')).toHaveAttribute('aria-pressed', 'true');
 
   await page.locator('#settingsBtn').click();
   await expect(page.locator('#toggleReduceAnimations')).toBeChecked();

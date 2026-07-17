@@ -54,7 +54,7 @@
     <!-- Top-right action buttons -->
     <div class="top-actions">
       <div class="view-wrap">
-        <button id="viewBtn" class="view-btn" aria-haspopup="true" aria-expanded="false" title="View options" aria-label="View options">View
+        <button id="viewBtn" class="view-btn" aria-haspopup="true" aria-expanded="false" title="Filter songs" aria-label="Filter songs">Filter
           <svg viewBox="0 0 12 8" width="12" height="8" aria-hidden="true" focusable="false"><path d="M1 1l5 5 5-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/></svg>
         </button>
         <div id="viewDropdown" class="view-dropdown" role="menu" aria-hidden="true">
@@ -90,6 +90,16 @@
     <div class="search-wrap">
       <input id="searchInput" class="search-input" type="search" placeholder="Search songs…" aria-label="Search songs" autocomplete="off" spellcheck="false">
       <span id="ostDurationEl" class="ost-duration-label"></span>
+      <div id="layoutSwitcher" class="layout-switcher" role="group" aria-label="Song layout">
+        <button class="layout-switcher__option active" type="button" data-layout="grid" aria-pressed="true" title="Grid view">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor"/><rect x="10" y="1" width="5" height="5" rx="1" fill="currentColor"/><rect x="1" y="10" width="5" height="5" rx="1" fill="currentColor"/><rect x="10" y="10" width="5" height="5" rx="1" fill="currentColor"/></svg>
+          <span>Grid</span>
+        </button>
+        <button class="layout-switcher__option" type="button" data-layout="list" aria-pressed="false" title="List view">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><rect x="1" y="2" width="3" height="3" rx=".7" fill="currentColor"/><rect x="6" y="2.5" width="9" height="2" rx="1" fill="currentColor"/><rect x="1" y="7" width="3" height="3" rx=".7" fill="currentColor"/><rect x="6" y="7.5" width="9" height="2" rx="1" fill="currentColor"/><rect x="1" y="12" width="3" height="3" rx=".7" fill="currentColor"/><rect x="6" y="12.5" width="9" height="2" rx="1" fill="currentColor"/></svg>
+          <span>List</span>
+        </button>
+      </div>
     </div>
 
     <section class="track-list" id="trackList" aria-live="polite"></section>
