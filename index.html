@@ -105,6 +105,10 @@
     <section class="track-list" id="trackList" aria-live="polite"></section>
   </main>
 
+  <div id="floatingSearchWrap" class="floating-search" aria-hidden="true">
+    <input id="floatingSearchInput" class="search-input" type="search" placeholder="Search songs…" aria-label="Floating song search" autocomplete="off" spellcheck="false">
+  </div>
+
   <audio id="audio" preload="none"></audio>
 
   <!-- Preloading toast (shown while a track is buffering/decoding) -->
@@ -163,6 +167,10 @@
         <div class="keyboard-hint__item">
           <kbd>F</kbd>
           <span>Toggle fullscreen player</span>
+        </div>
+        <div class="keyboard-hint__item">
+          <kbd>Ctrl / ⌘</kbd> + <kbd>F</kbd>
+          <span>Search songs</span>
         </div>
         <div class="keyboard-hint__item">
           <kbd>Ctrl</kbd> + <kbd>→</kbd>
@@ -240,6 +248,36 @@
 
       <div id="settingsPageExclusions" class="settings-page" aria-hidden="true" style="display:none">
         <p class="settings-hint">Add songs to your custom group, then choose <strong>Custom group</strong> in View.</p>
+        <div class="settings-group-sharing">
+          <div class="settings-group-sharing__actions">
+            <button id="customGroupShareBtn" class="modal-action-btn settings-action" type="button" disabled>Share</button>
+            <button id="customGroupImportToggleBtn" class="modal-action-btn settings-action" type="button" aria-expanded="false" aria-controls="customGroupImportPanel">Import from URL</button>
+          </div>
+          <div id="customGroupShareFallback" class="settings-group-sharing__fallback" hidden>
+            <label for="customGroupShareUrl" class="settings-hint">Copy this sharing URL</label>
+            <input id="customGroupShareUrl" class="settings-text-input" type="text" readonly aria-label="Group sharing URL">
+          </div>
+          <div id="customGroupImportPanel" class="settings-group-import" aria-hidden="true" hidden>
+            <label for="customGroupImportUrl" class="settings-hint">Group sharing URL</label>
+            <div class="settings-group-import__url-row">
+              <input id="customGroupImportUrl" class="settings-text-input" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://gangbeastsost.net/?group=…" aria-describedby="customGroupImportMessage">
+              <button id="customGroupPreviewBtn" class="modal-action-btn settings-action" type="button">Preview</button>
+            </div>
+            <p id="customGroupImportMessage" class="settings-group-import__message" role="status" aria-live="polite"></p>
+            <div id="customGroupImportPreview" class="settings-group-import__preview" tabindex="-1" hidden>
+              <strong id="customGroupImportName"></strong>
+              <dl>
+                <div><dt>Mode</dt><dd id="customGroupImportMode"></dd></div>
+                <div><dt id="customGroupImportMatchesLabel">Tracks in group</dt><dd id="customGroupImportMatches"></dd></div>
+                <div id="customGroupImportUnknownRow" hidden><dt>Tracks not found</dt><dd id="customGroupImportUnknown"></dd></div>
+              </dl>
+              <div class="settings-group-import__confirm-actions">
+                <button id="customGroupImportConfirmBtn" class="modal-action-btn settings-action" type="button">Import</button>
+                <button id="customGroupImportCancelBtn" class="modal-action-btn settings-action" type="button">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="settings-exclusions__profiles">
           <div id="customProfilesList" class="settings-profiles__list"></div>
         </div>
@@ -447,11 +485,11 @@
   </div>
   <div id="historyOverlay" class="history-overlay"></div>
 
-  <!-- Changelog toast (v2.1.1) -->
+  <!-- Changelog toast (v3.0.0) -->
   <div id="changelogToast" class="changelog-toast" aria-hidden="true">
     <div class="changelog-toast__header">
       <div class="changelog-toast__title">
-        <span class="changelog-toast__badge">v2.1.1</span>
+        <span class="changelog-toast__badge">v3.0.0</span>
         <span>Site Updated</span>
       </div>
       <div class="changelog-toast__actions">
@@ -461,7 +499,15 @@
     </div>
     <div class="changelog-toast__body" id="changelogBody">
       <ul class="changelog-toast__list">
-        <li><strong>Pulse animation</strong> — added a new pulse animation when clicking on song cards and buttons for visual feedback</li>
+        <li><strong>Gummy Broadcast redesign</strong> — a complete visual refresh with chunky controls, stage accent colors, denser cards, responsive layouts, and more playful motion.</li>
+        <li><strong>Grid and List views</strong> — switch between album cards and compact track rows; your preferred catalog layout is remembered.</li>
+        <li><strong>Faster search and filtering</strong> — press Ctrl/⌘ + F to jump to song search, with a floating search bar when the catalog toolbar is offscreen. “View” is now more clearly labeled “Filter.”</li>
+        <li><strong>Higher-fidelity M4A audio</strong> — most tracks were exported to M4A from the FLAC files in the <a href="https://downloads.khinsider.com/game-soundtracks/album/gang-beasts-switch-gamerip-2021" target="_blank" rel="noopener">2021 Switch gamerip</a>; Gang Beasts Days and Gang Beasts Nights use the OST-release versions.</li>
+        <li><strong>More reliable Safari playback</strong> — improved media preparation, seek timing, and a silent preroll for section jumps to prevent the beginning of songs from being cut off.</li>
+        <li><strong>Playback polish</strong> — refreshed timelines and circular playheads, corrected duration handling, safer rapid track switching, and hover animation for the currently playing card.</li>
+        <li><strong>Fullscreen and mobile improvements</strong> — sharper song backgrounds now use the site pattern and fade smoothly, while cramped player metadata hides before it can overlap controls.</li>
+        <li><strong>Custom group sharing</strong> — copy self-contained group links or import them with a preview, duplicate detection, missing-track reporting, and safe name collision handling. The group track picker also opens beyond the Settings panel without being clipped.</li>
+        <li><strong>Catalog maintenance</strong> — duration baking and validation now understand the M4A catalog, with broader automated coverage for playback and interface behavior.</li>
       </ul>
     </div>
   </div>

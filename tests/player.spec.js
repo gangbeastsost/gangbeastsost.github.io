@@ -11,6 +11,13 @@ function isListedCard(track) {
   return !(track.stage === 'Airship' && track.side === 'Game');
 }
 
+function expectedCustomAccent(value) {
+  const raw = String(value || '').trim();
+  const triplet = raw.match(/^(\d{1,3})[,\s]+(\d{1,3})[,\s]+(\d{1,3})$/)
+    || raw.match(/^rgb\(\s*(\d{1,3})[,\s]+(\d{1,3})[,\s]+(\d{1,3})\s*\)$/i);
+  return triplet ? `rgb(${triplet.slice(1).map(Number).join(', ')})` : raw;
+}
+
 function expectedCount(filter) {
   return tracks.filter((track) => {
     if (!isListedCard(track)) return false;
@@ -21,6 +28,10 @@ function expectedCount(filter) {
     if (filter === 'only') return track.artist !== OFFICIAL_ARTIST && !isDrums(track);
     return true;
   }).length;
+}
+
+function makeGroupSharePayload({ name, mode, trackIds, version = 1 }) {
+  return Buffer.from(JSON.stringify({ v: version, n: name, m: mode, t: trackIds }), 'utf8').toString('base64url');
 }
 
 async function openPlayer(page, path = '/') {
@@ -58,9 +69,15 @@ test('loads the catalog and supports search and built-in filters', async ({ page
   const stageAccents = await cards.evaluateAll((elements) => elements.map((element) => ({
     stage: element.dataset.stage,
     accent: element.style.getPropertyValue('--track-accent'),
+    trackIndex: Number(element.dataset.trackIndex),
   })));
   const accentsByStage = new Map();
-  for (const { stage, accent } of stageAccents) {
+  for (const { stage, accent, trackIndex } of stageAccents) {
+    const configuredAccent = String(tracks[trackIndex]?.accent || '').trim();
+    if (configuredAccent) {
+      expect(accent).toBe(expectedCustomAccent(configuredAccent));
+      continue;
+    }
     if (accentsByStage.has(stage)) expect(accent).toBe(accentsByStage.get(stage));
     else accentsByStage.set(stage, accent);
   }
@@ -74,6 +91,88 @@ test('loads the catalog and supports search and built-in filters', async ({ page
     await chooseFilter(page, filter);
     await expect(cards).toHaveCount(expectedCount(filter));
   }
+});
+
+test('opens a search-only floating control with Ctrl or Command F', async ({ page }) => {
+  await openPlayer(page);
+  const search = page.locator('#searchInput');
+  const floatingSearch = page.locator('#floatingSearchInput');
+  const floatingSearchWrap = page.locator('#floatingSearchWrap');
+  const searchWrap = page.locator('.search-wrap');
+  const cards = page.locator('#trackList .track');
+
+  await cards.nth(20).scrollIntoViewIfNeeded();
+  const anchorTopBefore = await cards.nth(20).evaluate((element) => Math.round(element.getBoundingClientRect().top));
+  const scrolledGeometry = await searchWrap.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { position: style.position, bottom: Math.round(rect.bottom) };
+  });
+  expect(scrolledGeometry.position).toBe('static');
+  expect(scrolledGeometry.bottom).toBeLessThan(0);
+
+  await page.keyboard.press('Control+f');
+  await expect(floatingSearch).toBeFocused();
+  await expect(floatingSearchWrap).toHaveClass(/open/);
+  await expect(floatingSearchWrap).toHaveAttribute('aria-hidden', 'false');
+  await expect(floatingSearchWrap.locator('input')).toHaveCount(1);
+  const floatingGeometry = await floatingSearchWrap.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { position: getComputedStyle(element).position, top: Math.round(rect.top), width: Math.round(rect.width) };
+  });
+  expect(floatingGeometry.position).toBe('fixed');
+  expect(floatingGeometry.top).toBeGreaterThan(0);
+  expect(floatingGeometry.width).toBeLessThanOrEqual(580);
+  const anchorTopAfter = await cards.nth(20).evaluate((element) => Math.round(element.getBoundingClientRect().top));
+  expect(anchorTopAfter).toBe(anchorTopBefore);
+
+  await floatingSearch.blur();
+  const metaShortcutWasPrevented = await page.evaluate(() => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'f',
+      code: 'KeyF',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    return !document.dispatchEvent(event);
+  });
+  expect(metaShortcutWasPrevented).toBe(true);
+  await expect(floatingSearch).toBeFocused();
+
+  await floatingSearch.fill('doseone');
+  await expect(search).toHaveValue('doseone');
+  await expect.poll(() => cards.count()).toBeGreaterThan(20);
+
+  // A narrow result set shortens the page enough to reveal the original search.
+  // Focus should move there without selecting and replacing the entire query.
+  await floatingSearch.fill('Tutorial');
+  await expect(cards).toHaveCount(1);
+  await expect(search).toBeFocused();
+  await expect(floatingSearchWrap).not.toHaveClass(/open/);
+  const transferredSelection = await search.evaluate((input) => ({
+    start: input.selectionStart,
+    end: input.selectionEnd,
+    length: input.value.length,
+  }));
+  expect(transferredSelection).toEqual({ start: 8, end: 8, length: 8 });
+  await page.keyboard.type('x');
+  await expect(search).toHaveValue('Tutorialx');
+
+  await search.fill('');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.keyboard.press('Control+f');
+  await expect(search).toBeFocused();
+  await expect(floatingSearchWrap).not.toHaveClass(/open/);
+});
+
+test('hides mini-player metadata before it can collide with centered controls', async ({ page }) => {
+  await page.setViewportSize({ width: 650, height: 520 });
+  await openPlayer(page, '/?song=Crane-B');
+
+  await expect(page.locator('#miniPlayer .mini-meta')).toBeHidden();
+  await expect(page.locator('#miniCover')).toBeVisible();
+  await expect(page.locator('#miniPlayer .mini-controls')).toBeVisible();
 });
 
 test('switches between the grid and compact list without changing catalog behavior', async ({ page }) => {
@@ -449,6 +548,11 @@ test('supports keyboard controls and important dialogs', async ({ page }) => {
   expect(fullscreenBackground.patternImage).toContain('radial-gradient');
   expect(fullscreenBackground.patternSize).toContain('18px 18px');
   await page.keyboard.press('Escape');
+  await expect(page.locator('#modal')).toHaveClass(/closing/);
+  await page.waitForTimeout(100);
+  const closingPatternOpacity = await page.locator('#modal').evaluate((element) => Number(getComputedStyle(element, '::before').opacity));
+  expect(closingPatternOpacity).toBeLessThan(0.78);
+  expect(closingPatternOpacity).toBeGreaterThan(0);
   await expect(page.locator('#modal')).toHaveClass(/hidden/);
 
   await page.locator('#helpBtn').click();
@@ -499,6 +603,23 @@ test('restores persisted visual settings, filter, and layout preferences', async
   await expect(page.locator('#toggleLiteMode')).toBeChecked();
 });
 
+test('announces the complete version 3 changelog once per version', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gb:changelog-seen', '2.1.1'));
+  await openPlayer(page);
+
+  const toast = page.locator('#changelogToast');
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.0');
+  await expect(toast).toHaveClass(/visible/);
+  await page.locator('#changelogToggle').click();
+  await expect(page.locator('#changelogBody')).toHaveClass(/open/);
+  await expect(page.locator('.changelog-toast__list li')).toHaveCount(9);
+  await expect(page.locator('.changelog-toast__list')).toContainText('Higher-fidelity M4A audio');
+  await expect(page.locator('.changelog-toast__list')).toContainText('Custom group sharing');
+
+  await page.locator('#changelogClose').click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:changelog-seen'))).toBe('3.0.0');
+});
+
 test('restores, opens, plays from, and clears listen history', async ({ page }) => {
   const tutorial = tracks.find((track) => track.stage === 'Tutorial' && track.side === 'A');
   await page.addInitScript((historyEntry) => {
@@ -518,4 +639,193 @@ test('restores, opens, plays from, and clears listen history', async ({ page }) 
   await page.locator('#historyClearBtn').click();
   await expect(page.locator('.history-empty')).toBeVisible();
   await expect(page.locator('.history-entry')).toHaveCount(0);
+});
+
+test('lets the custom-group track picker escape the settings panel boundary', async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 520 });
+  await page.addInitScript(() => {
+    localStorage.setItem('gb:customFilters', JSON.stringify([{
+      id: 'picker-group',
+      name: 'Picker test',
+      mode: 'exclude',
+      files: [],
+    }]));
+    localStorage.setItem('gb:customFiltersActive', 'picker-group');
+  });
+  await openPlayer(page);
+  await page.locator('#settingsBtn').click();
+  await page.locator('#settingsTabExclusions').click();
+  await page.locator('#customExcludeTrigger').click();
+
+  const menuGeometry = await page.locator('#customExcludeMenu').evaluate((menu) => {
+    const rect = menu.getBoundingClientRect();
+    return {
+      parentIsBody: menu.parentElement === document.body,
+      position: getComputedStyle(menu).position,
+      top: rect.top,
+      bottom: rect.bottom,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(menuGeometry.parentIsBody).toBe(true);
+  expect(menuGeometry.position).toBe('fixed');
+  expect(menuGeometry.top).toBeGreaterThanOrEqual(0);
+  expect(menuGeometry.bottom).toBeLessThanOrEqual(menuGeometry.viewportHeight);
+
+  await page.locator('#customExcludeSearch').fill('Tutorial');
+  await expect(page.locator('#customExcludeOptions [data-file]').first()).toBeVisible();
+  await page.locator('#customExcludeOptions [data-file]').first().click();
+  await expect(page.locator('#customExcludeMenu')).toHaveAttribute('aria-hidden', 'true');
+  expect(await page.locator('#customExcludeMenu').evaluate((menu) => menu.parentElement?.id)).toBe('customExcludeSelectWrap');
+});
+
+test('shares an active custom group with stable catalog identifiers and a manual-copy fallback', async ({ page }) => {
+  const menuA = tracks.find((track) => track.stage === 'Menu' && track.side === 'A');
+  const aquariumB = tracks.find((track) => track.stage === 'Aquarium' && track.side === 'B');
+  await page.addInitScript(({ files }) => {
+    localStorage.setItem('gb:customFilters', JSON.stringify([{
+      id: 'group-to-share',
+      name: 'Favorites ✨',
+      mode: 'include',
+      files,
+    }]));
+    localStorage.setItem('gb:customFiltersActive', 'group-to-share');
+  }, { files: [menuA.file, aquariumB.file] });
+
+  await openPlayer(page);
+  await page.locator('#settingsBtn').click();
+  await page.locator('#settingsTabExclusions').click();
+  await expect(page.locator('#customGroupShareBtn')).toBeEnabled();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__copiedGroupUrl = text; } },
+    });
+  });
+  await page.locator('#customGroupShareBtn').click();
+  await expect(page.locator('#customGroupShareBtn')).toHaveText('Copied!');
+  await expect.poll(() => page.evaluate(() => window.__copiedGroupUrl || '')).toContain('?group=');
+
+  await expect(page.locator('#customGroupShareBtn')).toHaveText('Share');
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = async () => { throw new Error('blocked'); };
+    document.execCommand = () => false;
+  });
+  await page.locator('#customGroupShareBtn').click();
+
+  await expect(page.locator('#customGroupShareFallback')).toBeVisible();
+  const shareUrl = await page.locator('#customGroupShareUrl').inputValue();
+  const parsedUrl = new URL(shareUrl);
+  expect(parsedUrl.pathname).toBe('/');
+  expect(parsedUrl.searchParams.has('song')).toBe(false);
+  const sharedGroup = JSON.parse(Buffer.from(parsedUrl.searchParams.get('group'), 'base64url').toString('utf8'));
+  expect(sharedGroup).toEqual({
+    v: 1,
+    n: 'Favorites ✨',
+    m: 'include',
+    t: ['Menu-A', 'Aquarium-B'],
+  });
+});
+
+test('previews a shared group before importing and preserves unrelated URL and filter state', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gb:viewFilter', 'drums-only'));
+  const payload = makeGroupSharePayload({
+    name: 'Party picks 🎉',
+    mode: 'include',
+    trackIds: ['Menu-A', 'Aquarium-B', 'RemovedStage-Z'],
+  });
+  await openPlayer(page, `/?song=Tutorial-A&group=${payload}`);
+
+  await expect(page.locator('#settingsModal')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#settingsPageExclusions')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#customGroupImportPanel')).toBeVisible();
+  await expect(page.locator('#customGroupImportName')).toHaveText('Party picks 🎉');
+  await expect(page.locator('#customGroupImportMode')).toHaveText('Include');
+  await expect(page.locator('#customGroupImportMatchesLabel')).toHaveText('Included tracks');
+  await expect(page.locator('#customGroupImportMatches')).toHaveText('2');
+  await expect(page.locator('#customGroupImportUnknown')).toHaveText('1');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:customFilters'))).toBeNull();
+  await expect.poll(() => page.evaluate(() => location.search)).toBe('?song=Tutorial-A');
+  await expect(page.locator('#trackList .track')).toHaveCount(expectedCount('drums-only'));
+
+  await page.locator('#customGroupImportConfirmBtn').click();
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gb:customFilters')));
+  expect(stored).toHaveLength(1);
+  expect(stored[0]).toMatchObject({
+    name: 'Party picks 🎉',
+    mode: 'include',
+    files: [
+      tracks.find((track) => track.stage === 'Menu' && track.side === 'A').file,
+      tracks.find((track) => track.stage === 'Aquarium' && track.side === 'B').file,
+    ],
+  });
+  expect(await page.evaluate(() => window.currentViewFilter)).toBe('drums-only');
+  expect(await page.evaluate(() => localStorage.getItem('gb:viewFilter'))).toBe('drums-only');
+  await expect(page.locator('#trackList .track')).toHaveCount(expectedCount('drums-only'));
+  await expect(page.locator('#customGroupImportMessage')).toContainText('Choose it from Filter');
+});
+
+test('suffixes same-name imports, deduplicates repeats, and rejects malformed group URLs', async ({ page }) => {
+  const menuA = tracks.find((track) => track.stage === 'Menu' && track.side === 'A');
+  await page.addInitScript(({ file }) => {
+    localStorage.setItem('gb:customFilters', JSON.stringify([{
+      id: 'existing-group',
+      name: 'Shared group',
+      mode: 'exclude',
+      files: [file],
+    }]));
+    localStorage.setItem('gb:customFiltersActive', 'existing-group');
+  }, { file: menuA.file });
+  await openPlayer(page);
+  await page.locator('#settingsBtn').click();
+  await page.locator('#settingsTabExclusions').click();
+  await page.locator('#customGroupImportToggleBtn').click();
+
+  const payload = makeGroupSharePayload({ name: 'Shared group', mode: 'exclude', trackIds: ['Aquarium-B'] });
+  const sharingUrl = `https://example.com/?group=${payload}`;
+  await page.locator('#customGroupImportUrl').fill(sharingUrl);
+  await page.locator('#customGroupPreviewBtn').click();
+  await expect(page.locator('#customGroupImportMatchesLabel')).toHaveText('Excluded tracks');
+  await expect(page.locator('#customGroupImportUnknownRow')).toBeHidden();
+  await page.locator('#customGroupImportConfirmBtn').click();
+  let stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gb:customFilters')));
+  expect(stored.map((group) => group.name)).toEqual(['Shared group', 'Shared group (2)']);
+
+  await page.locator('#customGroupImportUrl').fill(sharingUrl);
+  await page.locator('#customGroupPreviewBtn').click();
+  await page.locator('#customGroupImportConfirmBtn').click();
+  stored = await page.evaluate(() => JSON.parse(localStorage.getItem('gb:customFilters')));
+  expect(stored).toHaveLength(2);
+  expect(await page.evaluate(() => localStorage.getItem('gb:customFiltersActive'))).toBe(stored[1].id);
+  await expect(page.locator('#customGroupImportMessage')).toContainText('already exists');
+
+  await page.locator('#customGroupImportUrl').fill('/?group=not-valid-base64');
+  await page.locator('#customGroupPreviewBtn').click();
+  await expect(page.locator('#customGroupImportMessage')).toHaveClass(/is-error/);
+  await expect(page.locator('#customGroupImportPreview')).toBeHidden();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('gb:customFilters')))).toHaveLength(2);
+});
+
+test('rejects unsupported, oversized, and unavailable shared groups without changing storage', async ({ page }) => {
+  await openPlayer(page);
+  await page.locator('#settingsBtn').click();
+  await page.locator('#settingsTabExclusions').click();
+  await expect(page.locator('#customGroupShareBtn')).toBeDisabled();
+  await page.locator('#customGroupImportToggleBtn').click();
+
+  const invalidUrls = [
+    `/?group=${makeGroupSharePayload({ name: 'Future', mode: 'include', trackIds: ['Menu-A'], version: 2 })}`,
+    `/?group=${makeGroupSharePayload({ name: 'Missing', mode: 'exclude', trackIds: ['NoLongerHere-Z'] })}`,
+    `/?group=${'a'.repeat(8193)}`,
+  ];
+  const expectedErrors = ['unsupported sharing version', 'None of this group', 'too large'];
+
+  for (let index = 0; index < invalidUrls.length; index += 1) {
+    await page.locator('#customGroupImportUrl').fill(invalidUrls[index]);
+    await page.locator('#customGroupPreviewBtn').click();
+    await expect(page.locator('#customGroupImportMessage')).toContainText(expectedErrors[index]);
+    await expect(page.locator('#customGroupImportMessage')).toHaveClass(/is-error/);
+    await expect(page.locator('#customGroupImportPreview')).toBeHidden();
+  }
+  expect(await page.evaluate(() => localStorage.getItem('gb:customFilters'))).toBeNull();
 });

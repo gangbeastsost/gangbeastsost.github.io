@@ -12,6 +12,14 @@ import {
 } from './js/sharing.js';
 import { createHistoryController } from './js/history.js';
 import { downloadCatalogAsZip, downloadTrack } from './js/downloads.js';
+import {
+  createGroupShareUrl,
+  getAvailableGroupName,
+  getGroupFingerprint,
+  getSharedTrackId,
+  parseGroupShareUrl,
+  resolveSharedGroup,
+} from './js/group-sharing.js';
 
 const audio = document.getElementById('audio');
 const _audioFile = (filePath) => resolveAudioFile(filePath, audio);
@@ -62,6 +70,8 @@ const downloadAllLabel = document.getElementById('downloadAllLabel');
 const viewBtn = document.getElementById('viewBtn');
 const viewDropdown = document.getElementById('viewDropdown');
 const searchInput = document.getElementById('searchInput');
+const floatingSearchWrap = document.getElementById('floatingSearchWrap');
+const floatingSearchInput = document.getElementById('floatingSearchInput');
 const layoutSwitcher = document.getElementById('layoutSwitcher');
 const preloadToast = document.getElementById('preloadToast');
 const preloadToastText = document.getElementById('preloadToastText');
@@ -92,6 +102,23 @@ const customExclusionsNameInput = document.getElementById('customExclusionsName'
 const customExcludeAddBtn = document.getElementById('customExcludeAddBtn');
 const customExcludeList = document.getElementById('customExcludeList');
 const customExcludeClearBtn = document.getElementById('customExcludeClearBtn');
+const customGroupShareBtn = document.getElementById('customGroupShareBtn');
+const customGroupImportToggleBtn = document.getElementById('customGroupImportToggleBtn');
+const customGroupShareFallback = document.getElementById('customGroupShareFallback');
+const customGroupShareUrlInput = document.getElementById('customGroupShareUrl');
+const customGroupImportPanel = document.getElementById('customGroupImportPanel');
+const customGroupImportUrlInput = document.getElementById('customGroupImportUrl');
+const customGroupPreviewBtn = document.getElementById('customGroupPreviewBtn');
+const customGroupImportMessage = document.getElementById('customGroupImportMessage');
+const customGroupImportPreview = document.getElementById('customGroupImportPreview');
+const customGroupImportName = document.getElementById('customGroupImportName');
+const customGroupImportMode = document.getElementById('customGroupImportMode');
+const customGroupImportMatchesLabel = document.getElementById('customGroupImportMatchesLabel');
+const customGroupImportMatches = document.getElementById('customGroupImportMatches');
+const customGroupImportUnknownRow = document.getElementById('customGroupImportUnknownRow');
+const customGroupImportUnknown = document.getElementById('customGroupImportUnknown');
+const customGroupImportConfirmBtn = document.getElementById('customGroupImportConfirmBtn');
+const customGroupImportCancelBtn = document.getElementById('customGroupImportCancelBtn');
 const customViewFilterItem = document.getElementById('customViewFilterItem');
 const trackContextMenu = document.getElementById('trackContextMenu');
 const ostDurationEl = document.getElementById('ostDurationEl');
@@ -1020,6 +1047,7 @@ let customFilters = []; // [{id,name,mode,files[]}]
 let activeCustomFilterId = '';
 let customExcludePendingFile = '';
 let customExcludeSearchQuery = '';
+let pendingSharedGroup = null;
 let currentViewFilter = 'all';
 window.currentViewFilter = currentViewFilter;
 let currentLayoutMode = 'grid';
@@ -1388,6 +1416,178 @@ function saveCustomFilters(){
   }catch(e){}
 }
 
+function setGroupImportMessage(message = '', type = ''){
+  if(!customGroupImportMessage) return;
+  customGroupImportMessage.textContent = String(message || '');
+  customGroupImportMessage.classList.toggle('is-error', type === 'error');
+  customGroupImportMessage.classList.toggle('is-success', type === 'success');
+}
+
+function clearGroupImportPreview(){
+  pendingSharedGroup = null;
+  if(customGroupImportPreview) customGroupImportPreview.hidden = true;
+  if(customGroupImportUnknownRow) customGroupImportUnknownRow.hidden = true;
+}
+
+function setGroupImportPanelOpen(open, options = {}){
+  const shouldOpen = !!open;
+  if(customGroupImportPanel){
+    customGroupImportPanel.hidden = !shouldOpen;
+    customGroupImportPanel.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+  }
+  if(customGroupImportToggleBtn) customGroupImportToggleBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  if(!shouldOpen){
+    clearGroupImportPreview();
+    setGroupImportMessage();
+    if(customGroupImportUrlInput) customGroupImportUrlInput.value = '';
+  }else if(options.focus !== false){
+    try{ customGroupImportUrlInput?.focus(); }catch(e){}
+  }
+}
+
+function renderGroupImportPreview(group){
+  pendingSharedGroup = group;
+  if(customGroupImportName) customGroupImportName.textContent = group.name;
+  if(customGroupImportMode) customGroupImportMode.textContent = group.mode === 'include' ? 'Include' : 'Exclude';
+  if(customGroupImportMatchesLabel) customGroupImportMatchesLabel.textContent = group.mode === 'include' ? 'Included tracks' : 'Excluded tracks';
+  if(customGroupImportMatches) customGroupImportMatches.textContent = String(group.matchedTracks.length);
+  if(customGroupImportUnknown) customGroupImportUnknown.textContent = String(group.unknownTrackIds.length);
+  if(customGroupImportUnknownRow) customGroupImportUnknownRow.hidden = group.unknownTrackIds.length === 0;
+  if(customGroupImportPreview) customGroupImportPreview.hidden = false;
+  setGroupImportMessage(group.unknownTrackIds.length
+    ? `${group.unknownTrackIds.length} ${group.unknownTrackIds.length === 1 ? 'track was' : 'tracks were'} not found in this catalog and will be skipped.`
+    : 'Review this group before importing.');
+}
+
+function consumeSharedGroupQuery(){
+  try{
+    const url = new URL(window.location.href);
+    if(!url.searchParams.has('group')) return;
+    url.searchParams.delete('group');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }catch(e){}
+}
+
+function previewGroupShareUrl(value, options = {}){
+  clearGroupImportPreview();
+  try{
+    const decoded = parseGroupShareUrl(value, window.location.href);
+    const resolved = resolveSharedGroup(decoded, tracks);
+    renderGroupImportPreview(resolved);
+    if(options.consumeQuery) consumeSharedGroupQuery();
+    return true;
+  }catch(error){
+    setGroupImportMessage(error?.message || 'This group sharing URL could not be imported.', 'error');
+    return false;
+  }
+}
+
+function getCustomFilterTrackIds(filter){
+  const files = new Set(Array.isArray(filter?.files) ? filter.files.map(file=>String(file||'').trim()) : []);
+  return tracks
+    .filter(track => files.has(String(track?.file || '').trim()))
+    .map(getSharedTrackId)
+    .filter(Boolean);
+}
+
+function syncCustomGroupEditor(){
+  _loadActiveCustomFilterState();
+  renderCustomProfilesList();
+  updateCustomModeButtons();
+  updateCustomGroupControls();
+  updateCustomFilterOption();
+  if(customExclusionsNameInput) customExclusionsNameInput.value = customExclusionsName || '';
+  setCustomExcludeSelection('');
+  populateCustomExcludeSelect();
+  renderCustomExclusionsList();
+  syncViewDropdownPressed();
+}
+
+function importPendingSharedGroup(){
+  if(!pendingSharedGroup) return;
+  const incoming = pendingSharedGroup;
+  const incomingFingerprint = getGroupFingerprint({
+    name: '__shared_group_content__',
+    mode: incoming.mode,
+    trackIds: incoming.matchedTrackIds,
+  });
+  const isImportedNameVariant = (candidate)=>{
+    const localName = String(candidate || '').trim() || 'Custom group';
+    if(localName === incoming.name) return true;
+    const suffixMatch = localName.match(/ \((\d+)\)$/);
+    if(!suffixMatch || Number(suffixMatch[1]) < 2) return false;
+    const suffix = suffixMatch[0];
+    return localName === `${incoming.name.slice(0, 40 - suffix.length).trimEnd()}${suffix}`;
+  };
+  const identical = customFilters.find(filter => isImportedNameVariant(filter?.name) && getGroupFingerprint({
+      name: '__shared_group_content__',
+      mode: filter?.mode,
+      trackIds: getCustomFilterTrackIds(filter),
+    }) === incomingFingerprint);
+
+  let status;
+  if(identical){
+    _saveActiveCustomFilterState();
+    activeCustomFilterId = identical.id;
+    try{ localStorage.setItem(CUSTOM_FILTERS_ACTIVE_KEY, String(activeCustomFilterId || '')); }catch(e){}
+    status = `“${incoming.name}” already exists and is now selected.`;
+  }else{
+    const importedName = getAvailableGroupName(incoming.name, customFilters.map(filter => filter?.name));
+    const created = _newCustomFilter(importedName);
+    created.mode = incoming.mode;
+    created.files = [...incoming.files];
+    customFilters.push(created);
+    activeCustomFilterId = created.id;
+    _loadActiveCustomFilterState();
+    saveCustomFilters();
+    status = `Imported “${importedName}”. Choose it from Filter when you want to apply it.`;
+  }
+
+  syncCustomGroupEditor();
+  clearGroupImportPreview();
+  if(customGroupImportUrlInput) customGroupImportUrlInput.value = '';
+  setGroupImportMessage(status, 'success');
+}
+
+async function shareActiveCustomGroup(){
+  const activeGroup = _getActiveCustomFilter();
+  if(!activeGroup) return;
+  try{
+    const url = createGroupShareUrl(activeGroup, tracks, window.location.origin);
+    if(customGroupShareFallback) customGroupShareFallback.hidden = true;
+    const copied = await copyTextToClipboard(url);
+    if(copied){
+      if(customGroupShareBtn){
+        customGroupShareBtn.textContent = 'Copied!';
+        window.setTimeout(()=>{ if(customGroupShareBtn) customGroupShareBtn.textContent = 'Share'; }, 1100);
+      }
+    }else{
+      if(customGroupShareFallback) customGroupShareFallback.hidden = false;
+      if(customGroupShareUrlInput){
+        customGroupShareUrlInput.value = url;
+        customGroupShareUrlInput.focus();
+        customGroupShareUrlInput.select();
+      }
+    }
+  }catch(error){
+    setGroupImportPanelOpen(true, { focus:false });
+    setGroupImportMessage(error?.message || 'This group could not be shared.', 'error');
+  }
+}
+
+function handleIncomingGroupShare(){
+  try{
+    const url = new URL(window.location.href);
+    if(!url.searchParams.has('group')) return;
+    toggleSettingsModal(true);
+    showSettingsPage('exclusions');
+    setGroupImportPanelOpen(true, { focus:false });
+    if(customGroupImportUrlInput) customGroupImportUrlInput.value = url.href;
+    previewGroupShareUrl(url.href, { consumeQuery:true });
+    try{ customGroupImportPreview?.focus(); }catch(e){}
+  }catch(e){}
+}
+
 function updateCustomModeButtons(){
   try{
     const hasActiveGroup = !!_getActiveCustomFilter();
@@ -1401,16 +1601,26 @@ function updateCustomModeButtons(){
 
 function updateCustomGroupControls(){
   try{
-    const hasActiveGroup = !!_getActiveCustomFilter();
+    const activeGroup = _getActiveCustomFilter();
+    const hasActiveGroup = !!activeGroup;
+    const hasShareableTracks = !!(activeGroup && getCustomFilterTrackIds(activeGroup).length);
     if(customExclusionsNameInput) customExclusionsNameInput.disabled = !hasActiveGroup;
     if(customExcludeTrigger) customExcludeTrigger.disabled = !hasActiveGroup;
     if(customExcludeAddBtn) customExcludeAddBtn.disabled = !hasActiveGroup;
     if(customProfileDeleteBtn) customProfileDeleteBtn.disabled = !hasActiveGroup;
+    if(customGroupShareBtn){
+      customGroupShareBtn.disabled = !hasShareableTracks;
+      customGroupShareBtn.title = hasShareableTracks ? 'Copy a sharing URL for this group' : 'Add at least one track before sharing';
+    }
   }catch(e){}
 }
 
 function renderCustomProfilesList(){
   try{
+    if(customGroupShareFallback){
+      customGroupShareFallback.hidden = true;
+      if(customGroupShareUrlInput) customGroupShareUrlInput.value = '';
+    }
     if(!customProfilesList) return;
     if(!Array.isArray(customFilters) || customFilters.length === 0){
       customProfilesList.innerHTML = '<span class="settings-empty" style="width:100%">No groups yet</span>';
@@ -1622,9 +1832,62 @@ function closeCustomExcludeMenu(){
   try{
     if(customExcludeSelectWrap) customExcludeSelectWrap.classList.remove('open');
     if(customExcludeTrigger) customExcludeTrigger.setAttribute('aria-expanded', 'false');
-    if(customExcludeMenu) customExcludeMenu.setAttribute('aria-hidden', 'true');
+    if(customExcludeMenu){
+      customExcludeMenu.setAttribute('aria-hidden', 'true');
+      customExcludeMenu.classList.remove('is-portaled');
+      customExcludeMenu.style.removeProperty('left');
+      customExcludeMenu.style.removeProperty('top');
+      customExcludeMenu.style.removeProperty('bottom');
+      customExcludeMenu.style.removeProperty('width');
+      customExcludeMenu.style.removeProperty('max-height');
+      customExcludeMenu.style.removeProperty('--settings-select-options-height');
+      if(customExcludeSelectWrap && customExcludeMenu.parentElement !== customExcludeSelectWrap){
+        customExcludeSelectWrap.appendChild(customExcludeMenu);
+      }
+    }
     customExcludeSearchQuery = '';
     if(customExcludeSearch) customExcludeSearch.value = '';
+  }catch(e){}
+}
+
+function positionCustomExcludeMenu(){
+  try{
+    if(!customExcludeMenu || !customExcludeTrigger || !customExcludeSelectWrap?.classList.contains('open')) return;
+    const viewportPadding = 12;
+    const gap = 8;
+    const triggerRect = customExcludeTrigger.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const width = Math.min(triggerRect.width, viewportWidth - viewportPadding * 2);
+    const left = Math.max(viewportPadding, Math.min(triggerRect.left, viewportWidth - width - viewportPadding));
+    const roomBelow = viewportHeight - triggerRect.bottom - viewportPadding - gap;
+    const roomAbove = triggerRect.top - viewportPadding - gap;
+    const openAbove = roomBelow < 240 && roomAbove > roomBelow;
+    const availableHeight = Math.max(120, Math.min(320, openAbove ? roomAbove : roomBelow));
+
+    customExcludeMenu.style.width = `${Math.round(width)}px`;
+    customExcludeMenu.style.left = `${Math.round(left)}px`;
+    customExcludeMenu.style.maxHeight = `${Math.round(availableHeight)}px`;
+    customExcludeMenu.style.setProperty('--settings-select-options-height', `${Math.max(70, Math.round(availableHeight - 58))}px`);
+    if(openAbove){
+      customExcludeMenu.style.top = 'auto';
+      customExcludeMenu.style.bottom = `${Math.round(viewportHeight - triggerRect.top + gap)}px`;
+    }else{
+      customExcludeMenu.style.top = `${Math.round(triggerRect.bottom + gap)}px`;
+      customExcludeMenu.style.bottom = 'auto';
+    }
+  }catch(e){}
+}
+
+function openCustomExcludeMenu(){
+  try{
+    if(!customExcludeMenu || !customExcludeSelectWrap || !customExcludeTrigger) return;
+    customExcludeSelectWrap.classList.add('open');
+    customExcludeTrigger.setAttribute('aria-expanded', 'true');
+    customExcludeMenu.setAttribute('aria-hidden', 'false');
+    customExcludeMenu.classList.add('is-portaled');
+    document.body.appendChild(customExcludeMenu);
+    positionCustomExcludeMenu();
   }catch(e){}
 }
 
@@ -2148,10 +2411,43 @@ async function init(){
   // Search bar
   try{
     if(searchInput){
-      searchInput.addEventListener('input', ()=>{
-        try{ searchQuery = String(searchInput.value || ''); }catch(e){ searchQuery = ''; }
+      const updateSearchQuery = (source, mirror)=>{
+        try{ searchQuery = String(source.value || ''); }catch(e){ searchQuery = ''; }
+        try{ if(mirror && mirror.value !== searchQuery) mirror.value = searchQuery; }catch(e){}
         try{ renderList(); }catch(e){}
-      });
+      };
+      searchInput.addEventListener('input', ()=>{ updateSearchQuery(searchInput, floatingSearchInput); });
+      if(floatingSearchInput){
+        floatingSearchInput.addEventListener('input', ()=>{ updateSearchQuery(floatingSearchInput, searchInput); });
+      }
+
+      if(floatingSearchWrap && floatingSearchInput){
+        let floatingSearchFrame = 0;
+        const closeFloatingSearchAtCatalog = ()=>{
+          floatingSearchFrame = 0;
+          if(!floatingSearchWrap.classList.contains('open')) return;
+          const rect = searchInput.getBoundingClientRect();
+          const originalIsVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+          if(!originalIsVisible) return;
+          const shouldTransferFocus = document.activeElement === floatingSearchInput;
+          floatingSearchWrap.classList.remove('open');
+          floatingSearchWrap.setAttribute('aria-hidden','true');
+          if(shouldTransferFocus){
+            const valueLength = String(floatingSearchInput.value || '').length;
+            const selectionStart = Number.isInteger(floatingSearchInput.selectionStart) ? floatingSearchInput.selectionStart : valueLength;
+            const selectionEnd = Number.isInteger(floatingSearchInput.selectionEnd) ? floatingSearchInput.selectionEnd : selectionStart;
+            const selectionDirection = floatingSearchInput.selectionDirection || 'none';
+            searchInput.focus({preventScroll:true});
+            try{ searchInput.setSelectionRange(selectionStart, selectionEnd, selectionDirection); }catch(e){}
+          }
+        };
+        const queueFloatingSearchCheck = ()=>{
+          if(floatingSearchFrame) return;
+          floatingSearchFrame = requestAnimationFrame(closeFloatingSearchAtCatalog);
+        };
+        window.addEventListener('scroll', queueFloatingSearchCheck, {passive:true});
+        window.addEventListener('resize', queueFloatingSearchCheck);
+      }
     }
   }catch(e){}
 
@@ -2519,14 +2815,12 @@ async function init(){
         if(open){
           closeCustomExcludeMenu();
         }else{
-          if(customExcludeSelectWrap) customExcludeSelectWrap.classList.add('open');
-          if(customExcludeTrigger) customExcludeTrigger.setAttribute('aria-expanded', 'true');
-          if(customExcludeMenu) customExcludeMenu.setAttribute('aria-hidden', 'false');
           if(customExcludeSearch){
             customExcludeSearchQuery = '';
             customExcludeSearch.value = '';
           }
           populateCustomExcludeSelect();
+          openCustomExcludeMenu();
           try{ if(customExcludeSearch) customExcludeSearch.focus(); }catch(e){}
         }
       });
@@ -2540,6 +2834,7 @@ async function init(){
     }
     if(customExcludeMenu){
       customExcludeMenu.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
         const opt = ev.target.closest('[data-file]');
         if(!opt || opt.disabled) return;
         const file = String(opt.getAttribute('data-file') || '').trim();
@@ -2577,6 +2872,36 @@ async function init(){
         syncViewDropdownPressed();
         try{ renderList(); }catch(e){}
       });
+    }
+    if(customGroupShareBtn){
+      customGroupShareBtn.addEventListener('click', ()=>{ shareActiveCustomGroup(); });
+    }
+    if(customGroupImportToggleBtn){
+      customGroupImportToggleBtn.addEventListener('click', ()=>{
+        const isOpen = customGroupImportPanel && !customGroupImportPanel.hidden;
+        setGroupImportPanelOpen(!isOpen);
+      });
+    }
+    if(customGroupPreviewBtn){
+      customGroupPreviewBtn.addEventListener('click', ()=>{
+        previewGroupShareUrl(customGroupImportUrlInput?.value || '');
+      });
+    }
+    if(customGroupImportUrlInput){
+      customGroupImportUrlInput.addEventListener('keydown', (ev)=>{
+        if(ev.key !== 'Enter') return;
+        ev.preventDefault();
+        previewGroupShareUrl(customGroupImportUrlInput.value);
+      });
+    }
+    if(customGroupImportConfirmBtn){
+      customGroupImportConfirmBtn.addEventListener('click', ()=>{ importPendingSharedGroup(); });
+    }
+    if(customGroupImportCancelBtn){
+      customGroupImportCancelBtn.addEventListener('click', ()=>{ setGroupImportPanelOpen(false); });
+    }
+    if(customGroupShareUrlInput){
+      customGroupShareUrlInput.addEventListener('focus', ()=>{ customGroupShareUrlInput.select(); });
     }
     
     // "View Keyboard Shortcuts" button in info modal
@@ -2678,11 +3003,13 @@ async function init(){
     
     // Click anywhere to close context menu (except on the menu itself)
     document.addEventListener('click', (ev)=>{ 
-      if(customExcludeSelectWrap && !ev.target.closest('#customExcludeSelectWrap')) closeCustomExcludeMenu();
+      if(customExcludeSelectWrap && !ev.target.closest('#customExcludeSelectWrap') && !ev.target.closest('#customExcludeMenu')) closeCustomExcludeMenu();
       if(!ev.target.closest('#trackContextMenu')){
         hideContextMenu(); 
       }
     });
+    window.addEventListener('resize', positionCustomExcludeMenu);
+    window.addEventListener('scroll', positionCustomExcludeMenu, true);
     document.addEventListener('contextmenu', (ev)=>{
       if(!ev.target.closest('.track')){
         hideContextMenu();
@@ -2690,6 +3017,48 @@ async function init(){
     });
     
     document.addEventListener('keydown', (ev)=>{
+      const isSearchShortcut = (ev.ctrlKey || ev.metaKey) && !ev.altKey &&
+        (ev.code === 'KeyF' || String(ev.key || '').toLowerCase() === 'f');
+      if(isSearchShortcut && searchInput){
+        try{
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          if(waveformActive) toggleWaveform();
+          if(modal && !modal.classList.contains('hidden')) closeModal();
+          if(settingsModal && settingsModal.getAttribute('aria-hidden') === 'false') toggleSettingsModal(false);
+          if(infoModal && infoModal.getAttribute('aria-hidden') === 'false') toggleInfoModal();
+          if(keyboardHint && keyboardHint.getAttribute('aria-hidden') === 'false') toggleKeyboardHint();
+          const rect = searchInput.getBoundingClientRect();
+          const originalIsVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+          if(originalIsVisible || !floatingSearchWrap || !floatingSearchInput){
+            if(floatingSearchWrap){
+              floatingSearchWrap.classList.remove('open');
+              floatingSearchWrap.setAttribute('aria-hidden','true');
+            }
+            searchInput.focus({preventScroll:true});
+            searchInput.select();
+          }else{
+            floatingSearchInput.value = searchInput.value;
+            floatingSearchWrap.classList.add('open');
+            floatingSearchWrap.setAttribute('aria-hidden','false');
+            floatingSearchInput.focus({preventScroll:true});
+            floatingSearchInput.select();
+          }
+        }catch(e){}
+        return;
+      }
+
+      if(ev.key === 'Escape' && floatingSearchWrap && floatingSearchWrap.classList.contains('open')){
+        try{
+          floatingSearchWrap.classList.remove('open');
+          floatingSearchWrap.setAttribute('aria-hidden','true');
+          if(floatingSearchInput) floatingSearchInput.blur();
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+        }catch(e){}
+        return;
+      }
+
       // ignore when focused on inputs or editable areas
       const tgt = ev.target || {};
       const tag = (tgt.tagName || '').toUpperCase();
@@ -2755,6 +3124,7 @@ async function init(){
       }
     });
   }catch(e){}
+  handleIncomingGroupShare();
   // Startup-only: if the user loads a song while restore is still running, don't clobber the active UI.
   try{
     const hasLoadedTrack = !!(audio && audio.src);
@@ -2897,10 +3267,31 @@ function preloadAllDurations(){
 
 let gummyStageColorMap = null;
 
-function getTrackStageAccent(track){
-  if(track && typeof track.accent === 'string' && track.accent.trim()){
-    return track.accent.trim();
+function normalizeTrackAccent(accent){
+  const value = typeof accent === 'string' ? accent.trim() : '';
+  if(!value) return '';
+
+  const rgbTriplet = value.match(/^(\d{1,3})[,\s]+(\d{1,3})[,\s]+(\d{1,3})$/)
+    || value.match(/^rgb\(\s*(\d{1,3})[,\s]+(\d{1,3})[,\s]+(\d{1,3})\s*\)$/i);
+  if(rgbTriplet){
+    const channels = rgbTriplet.slice(1).map(Number);
+    if(channels.every(channel => channel >= 0 && channel <= 255)){
+      return `rgb(${channels.join(', ')})`;
+    }
+    return '';
   }
+
+  try{
+    if(window.CSS && typeof window.CSS.supports === 'function' && window.CSS.supports('color', value)){
+      return value;
+    }
+  }catch(e){}
+  return '';
+}
+
+function getTrackStageAccent(track){
+  const customAccent = normalizeTrackAccent(track && track.accent);
+  if(customAccent) return customAccent;
   if(!gummyStageColorMap){
     const stageNames = [...new Set((tracks || [])
       .map(item => String((item && (item.stage || item.title)) || 'track'))
