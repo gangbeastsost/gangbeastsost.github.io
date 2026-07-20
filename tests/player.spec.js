@@ -603,21 +603,35 @@ test('restores persisted visual settings, filter, and layout preferences', async
   await expect(page.locator('#toggleLiteMode')).toBeChecked();
 });
 
-test('announces the complete version 3 changelog once per version', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('gb:changelog-seen', '2.1.1'));
+test('announces 3.0.1 and keeps the 3.0.0 changelog accessible', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gb:changelog-seen', '3.0.0'));
   await openPlayer(page);
 
   const toast = page.locator('#changelogToast');
-  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.0');
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.1');
   await expect(toast).toHaveClass(/visible/);
   await page.locator('#changelogToggle').click();
   await expect(page.locator('#changelogBody')).toHaveClass(/open/);
-  await expect(page.locator('.changelog-toast__list li')).toHaveCount(9);
-  await expect(page.locator('.changelog-toast__list')).toContainText('Higher-fidelity M4A audio');
-  await expect(page.locator('.changelog-toast__list')).toContainText('Custom group sharing');
+  const currentRelease = page.locator('[data-changelog-version="3.0.1"]');
+  await expect(currentRelease.locator('li')).toHaveCount(3);
+  await expect(currentRelease).toContainText('Complete OST archive');
+  await expect(currentRelease).not.toContainText('Whopper');
+
+  await page.locator('[data-changelog-version-button="3.0.0"]').click();
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.0');
+  const previousRelease = page.locator('[data-changelog-version="3.0.0"]');
+  await expect(previousRelease).toBeVisible();
+  await expect(previousRelease.locator('li')).toHaveCount(9);
+  await expect(previousRelease).toContainText('Higher-fidelity M4A audio');
+  await expect(previousRelease).toContainText('Custom group sharing');
 
   await page.locator('#changelogClose').click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:changelog-seen'))).toBe('3.0.0');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:changelog-seen'))).toBe('3.0.1');
+
+  await page.locator('#helpBtn').click();
+  await page.locator('#showChangelogBtn').click();
+  await expect(toast).toHaveClass(/visible/);
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.1');
 });
 
 test('restores, opens, plays from, and clears listen history', async ({ page }) => {

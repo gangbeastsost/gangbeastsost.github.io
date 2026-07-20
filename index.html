@@ -66,10 +66,10 @@
           <button id="customViewFilterItem" class="dropdown-item" role="menuitem" data-value="custom" aria-pressed="false" style="display:none">Custom exclusions</button>
         </div>
       </div>
-      <button id="downloadAllBtn" class="preload-all" title="Download all tracks" aria-label="Download all tracks" data-tooltip="Download every track as a ZIP">
+      <a id="downloadAllBtn" class="preload-all" href="https://github.com/gangbeastsost/gangbeastsost.github.io/releases/download/v1.0.0/Gang.Beasts.OST.Incl.Drums.+.Customs.zip" rel="noopener" aria-label="Download the complete OST, including drums and custom tracks">
         <svg viewBox="0 0 11 13" width="12" height="14" aria-hidden="true" focusable="false"><path d="m1.3 12.3l9-0.1m-8.5-6.5l4 3.5 4-3.5m-4-5v8.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.2" fill="none"/></svg>
-        <span id="downloadAllLabel">Download All</span>
-      </button>
+        <span id="downloadAllLabel">Download Complete OST</span>
+      </a>
       <a id="githubBtn" class="preload-all" href="https://github.com/gangbeastsost/gangbeastsost.github.io" target="_blank" rel="noopener" aria-label="Open GitHub repository" title="Open GitHub repository">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2 .37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -202,6 +202,10 @@
         <button id="showHotkeysBtn" class="info-modal-btn modal-action-btn">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" style="margin-right:6px"><path fill="currentColor" d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/></svg>
           View Keyboard Shortcuts
+        </button>
+        <button id="showChangelogBtn" class="info-modal-btn modal-action-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false" style="margin-right:6px"><path fill="currentColor" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 5v2h10V8H7zm0 4v2h10v-2H7zm0 4v2h7v-2H7z"/></svg>
+          View Changelog
         </button>
         <a href="https://github.com/gangbeastsost/gangbeastsost.github.io" target="_blank" rel="noopener" class="info-modal-btn modal-action-btn" style="text-decoration:none">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" style="margin-right:6px"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2 .37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -485,11 +489,11 @@
   </div>
   <div id="historyOverlay" class="history-overlay"></div>
 
-  <!-- Changelog toast (v3.0.0) -->
-  <div id="changelogToast" class="changelog-toast" aria-hidden="true">
+  <!-- Changelog toast (v3.0.1) -->
+  <div id="changelogToast" class="changelog-toast" data-current-version="3.0.1" aria-hidden="true">
     <div class="changelog-toast__header">
       <div class="changelog-toast__title">
-        <span class="changelog-toast__badge">v3.0.0</span>
+        <span class="changelog-toast__badge">v3.0.1</span>
         <span>Site Updated</span>
       </div>
       <div class="changelog-toast__actions">
@@ -498,17 +502,30 @@
       </div>
     </div>
     <div class="changelog-toast__body" id="changelogBody">
-      <ul class="changelog-toast__list">
-        <li><strong>Gummy Broadcast redesign</strong> — a complete visual refresh with chunky controls, stage accent colors, denser cards, responsive layouts, and more playful motion.</li>
-        <li><strong>Grid and List views</strong> — switch between album cards and compact track rows; your preferred catalog layout is remembered.</li>
-        <li><strong>Faster search and filtering</strong> — press Ctrl/⌘ + F to jump to song search, with a floating search bar when the catalog toolbar is offscreen. “View” is now more clearly labeled “Filter.”</li>
-        <li><strong>Higher-fidelity M4A audio</strong> — most tracks were exported to M4A from the FLAC files in the <a href="https://downloads.khinsider.com/game-soundtracks/album/gang-beasts-switch-gamerip-2021" target="_blank" rel="noopener">2021 Switch gamerip</a>; Gang Beasts Days and Gang Beasts Nights use the OST-release versions.</li>
-        <li><strong>More reliable Safari playback</strong> — improved media preparation, seek timing, and a silent preroll for section jumps to prevent the beginning of songs from being cut off.</li>
-        <li><strong>Playback polish</strong> — refreshed timelines and circular playheads, corrected duration handling, safer rapid track switching, and hover animation for the currently playing card.</li>
-        <li><strong>Fullscreen and mobile improvements</strong> — sharper song backgrounds now use the site pattern and fade smoothly, while cramped player metadata hides before it can overlap controls.</li>
-        <li><strong>Custom group sharing</strong> — copy self-contained group links or import them with a preview, duplicate detection, missing-track reporting, and safe name collision handling. The group track picker also opens beyond the Settings panel without being clipped.</li>
-        <li><strong>Catalog maintenance</strong> — duration baking and validation now understand the M4A catalog, with broader automated coverage for playback and interface behavior.</li>
-      </ul>
+      <div class="changelog-toast__versions" role="tablist" aria-label="Changelog versions">
+        <button class="changelog-toast__version active" type="button" role="tab" data-changelog-version-button="3.0.1" aria-selected="true">v3.0.1</button>
+        <button class="changelog-toast__version" type="button" role="tab" data-changelog-version-button="3.0.0" aria-selected="false">v3.0.0</button>
+      </div>
+      <section class="changelog-toast__release active" data-changelog-version="3.0.1" role="tabpanel">
+        <ul class="changelog-toast__list">
+          <li><strong>Complete OST archive</strong> — Download Complete OST now uses a prebuilt, organized ZIP containing the main soundtrack, drum mixes, and custom tracks.</li>
+          <li><strong>Download-manager support</strong> — the OST download is a native link, so its release URL can be copied directly from the browser context menu.</li>
+          <li><strong>Catalog cleanup</strong> — corrected the Floating Ship Symphony original-version asset reference and kept validation aligned with the packaged M4A files.</li>
+        </ul>
+      </section>
+      <section class="changelog-toast__release" data-changelog-version="3.0.0" role="tabpanel" hidden>
+        <ul class="changelog-toast__list">
+          <li><strong>Gummy Broadcast redesign</strong> — a complete visual refresh with chunky controls, stage accent colors, denser cards, responsive layouts, and more playful motion.</li>
+          <li><strong>Grid and List views</strong> — switch between album cards and compact track rows; your preferred catalog layout is remembered.</li>
+          <li><strong>Faster search and filtering</strong> — press Ctrl/⌘ + F to jump to song search, with a floating search bar when the catalog toolbar is offscreen. “View” is now more clearly labeled “Filter.”</li>
+          <li><strong>Higher-fidelity M4A audio</strong> — most tracks were exported to M4A from the FLAC files in the <a href="https://downloads.khinsider.com/game-soundtracks/album/gang-beasts-switch-gamerip-2021" target="_blank" rel="noopener">2021 Switch gamerip</a>; Gang Beasts Days and Gang Beasts Nights use the OST-release versions.</li>
+          <li><strong>More reliable Safari playback</strong> — improved media preparation, seek timing, and a silent preroll for section jumps to prevent the beginning of songs from being cut off.</li>
+          <li><strong>Playback polish</strong> — refreshed timelines and circular playheads, corrected duration handling, safer rapid track switching, and hover animation for the currently playing card.</li>
+          <li><strong>Fullscreen and mobile improvements</strong> — sharper song backgrounds now use the site pattern and fade smoothly, while cramped player metadata hides before it can overlap controls.</li>
+          <li><strong>Custom group sharing</strong> — copy self-contained group links or import them with a preview, duplicate detection, missing-track reporting, and safe name collision handling. The group track picker also opens beyond the Settings panel without being clipped.</li>
+          <li><strong>Catalog maintenance</strong> — duration baking and validation now understand the M4A catalog, with broader automated coverage for playback and interface behavior.</li>
+        </ul>
+      </section>
     </div>
   </div>
 

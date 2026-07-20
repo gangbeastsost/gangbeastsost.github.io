@@ -11,7 +11,7 @@ import {
   wireCopyButtons,
 } from './js/sharing.js';
 import { createHistoryController } from './js/history.js';
-import { downloadCatalogAsZip, downloadTrack } from './js/downloads.js';
+import { downloadTrack } from './js/downloads.js';
 import {
   createGroupShareUrl,
   getAvailableGroupName,
@@ -65,8 +65,6 @@ const miniShuffle = document.getElementById('miniShuffle');
 const miniLoop = document.getElementById('miniLoop');
 const mDownload = document.getElementById('mDownload');
 const miniDownload = document.getElementById('miniDownload');
-const downloadAllBtn = document.getElementById('downloadAllBtn');
-const downloadAllLabel = document.getElementById('downloadAllLabel');
 const viewBtn = document.getElementById('viewBtn');
 const viewDropdown = document.getElementById('viewDropdown');
 const searchInput = document.getElementById('searchInput');
@@ -2601,28 +2599,6 @@ async function init(){
     if(histOverlay) histOverlay.addEventListener('click', ()=>{ toggleHistoryPanel(); });
   }catch(e){ console.warn('history wiring failed', e); }
 
-  // Download All button
-  try{
-    const adjustDownloadTooltipAlignment = ()=>{
-      try{
-        if(!downloadAllBtn) return;
-        const rect = downloadAllBtn.getBoundingClientRect();
-        const tooltipMax = 300;
-        if(rect.left + tooltipMax > window.innerWidth - 12){ downloadAllBtn.classList.add('tooltip-right'); }
-        else { downloadAllBtn.classList.remove('tooltip-right'); }
-      }catch(e){}
-    };
-    if(downloadAllBtn){
-      downloadAllBtn.addEventListener('mouseenter', adjustDownloadTooltipAlignment);
-      downloadAllBtn.addEventListener('focus', adjustDownloadTooltipAlignment);
-      downloadAllBtn.addEventListener('click', async ()=>{
-        try{ downloadAllBtn.disabled = true; await downloadAllTracks(); }catch(e){ console.warn(e); }
-        try{ downloadAllBtn.disabled = false; }catch(e){}
-      });
-    }
-    window.addEventListener('resize', adjustDownloadTooltipAlignment);
-  }catch(e){}
-
   // View dropdown behavior
   try{
     if(viewBtn && viewDropdown){
@@ -4401,7 +4377,7 @@ function _showWhopper(){
   try{
     _whopperActive = true;
     const W_IMG   = 'images/whopper.png';
-    const W_AUDIO = 'music/whopper.ogg'; // OGG primary; Safari swapped to .mp3 via _audioFile at load time
+    const W_AUDIO = 'music/m4a/whopper.m4a';
     const W_TITLE = 'Whopper Whopper';
     const W_ARTIST= 'Burger King';
 
@@ -4481,7 +4457,7 @@ function _showWhopper(){
     // 7. Re-render the track list immediately (images/names update now)
     try{ renderList(); }catch(e){}
 
-    // 8. Load whopper.mp3's actual duration, then patch trackDurations + tracks[i].duration
+    // 8. Load whopper.m4a's actual duration, then patch trackDurations + tracks[i].duration
     //    and re-render so all per-track durations and the total OST duration reflect whopper
     try{
       const durProbe = new Audio();
@@ -4731,13 +4707,6 @@ if(mCover){
 
 function downloadTrackAt(i){
   downloadTrack(tracks[i]);
-}
-
-async function downloadAllTracks(){
-  return downloadCatalogAsZip(tracks, {
-    button: downloadAllBtn,
-    label: downloadAllLabel,
-  });
 }
 
 // keyboard
@@ -5522,21 +5491,53 @@ init();
 
 // Changelog toast — show once per version
 (function(){
-  const badge = document.querySelector('#changelogToast .changelog-toast__badge');
-  const VERSION = (badge && badge.textContent ? badge.textContent.trim().replace(/^v/i, '') : '0');
+  const toast   = document.getElementById('changelogToast');
+  if (!toast) return;
+  const badge = toast.querySelector('.changelog-toast__badge');
+  const VERSION = String(toast.dataset.currentVersion || '0');
   const KEY = 'gb:changelog-seen';
   let seen;
   try { seen = localStorage.getItem(KEY); } catch(e) {}
-  if (seen === VERSION) return;
 
-  const toast   = document.getElementById('changelogToast');
   const toggle  = document.getElementById('changelogToggle');
   const closeBtn= document.getElementById('changelogClose');
   const body    = document.getElementById('changelogBody');
-  if (!toast) return;
+  const showChangelogBtn = document.getElementById('showChangelogBtn');
+  const versionButtons = [...toast.querySelectorAll('[data-changelog-version-button]')];
+  const releases = [...toast.querySelectorAll('[data-changelog-version]')];
 
-  // Show after a short delay so the page settles
-  setTimeout(() => toast.classList.add('visible'), 1200);
+  function selectChangelogVersion(version){
+    const selected = String(version || VERSION);
+    versionButtons.forEach((button)=>{
+      const active = button.dataset.changelogVersionButton === selected;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    releases.forEach((release)=>{
+      const active = release.dataset.changelogVersion === selected;
+      release.classList.toggle('active', active);
+      release.hidden = !active;
+    });
+    if(badge) badge.textContent = `v${selected}`;
+    requestAnimationFrame(updateChangelogBodyScrollState);
+  }
+
+  function showChangelog(expand=false){
+    toast.classList.remove('dismissed');
+    toast.classList.add('visible');
+    toast.setAttribute('aria-hidden', 'false');
+    if(expand && body && toggle){
+      body.classList.add('open');
+      toggle.textContent = 'Collapse';
+      toggle.setAttribute('aria-label', 'Collapse changelog');
+      updateChangelogBodyScrollState();
+    }
+  }
+
+  selectChangelogVersion(VERSION);
+
+  // Show after a short delay so the page settles, unless this version was already dismissed.
+  if(seen !== VERSION) setTimeout(() => showChangelog(false), 1200);
 
   function getChangelogExpandedMaxHeight(){
     return Math.min((window.innerHeight || 0) * 0.6, 420);
@@ -5554,34 +5555,51 @@ init();
     body.classList.toggle('can-scroll', canScroll);
   }
 
-  body.addEventListener('transitionend', (ev) => {
-    if(ev.propertyName !== 'max-height') return;
-    updateChangelogBodyScrollState();
-  });
+  if(body){
+    body.addEventListener('transitionend', (ev) => {
+      if(ev.propertyName !== 'max-height') return;
+      updateChangelogBodyScrollState();
+    });
+  }
 
   window.addEventListener('resize', () => {
     updateChangelogBodyScrollState();
   });
 
-  toggle.addEventListener('click', () => {
-    const opening = !body.classList.contains('open');
-    if(opening){
-      // Decide before expansion starts so long changelogs keep a visible scrollbar during animation.
-      body.classList.toggle('can-scroll', shouldShowChangelogScrollbar());
-      body.classList.add('open');
-    }else{
-      body.classList.remove('open');
-    }
-    const open = body.classList.contains('open');
-    toggle.textContent = open ? 'Collapse' : "What's new";
+  if(toggle && body){
+    toggle.addEventListener('click', () => {
+      const opening = !body.classList.contains('open');
+      if(opening){
+        // Decide before expansion starts so long changelogs keep a visible scrollbar during animation.
+        body.classList.toggle('can-scroll', shouldShowChangelogScrollbar());
+        body.classList.add('open');
+      }else{
+        body.classList.remove('open');
+      }
+      const open = body.classList.contains('open');
+      toggle.textContent = open ? 'Collapse' : "What's new";
+      toggle.setAttribute('aria-label', open ? 'Collapse changelog' : 'Expand changelog');
+    });
+  }
+
+  versionButtons.forEach((button)=>{
+    button.addEventListener('click', ()=> selectChangelogVersion(button.dataset.changelogVersionButton));
   });
 
   function dismiss() {
     toast.classList.add('dismissed');
     toast.classList.remove('visible');
+    toast.setAttribute('aria-hidden', 'true');
     try { localStorage.setItem(KEY, VERSION); } catch(e) {}
-    setTimeout(() => toast.remove(), 320);
+    setTimeout(() => toast.classList.remove('dismissed'), 320);
   }
 
-  closeBtn.addEventListener('click', dismiss);
+  if(closeBtn) closeBtn.addEventListener('click', dismiss);
+  if(showChangelogBtn){
+    showChangelogBtn.addEventListener('click', ()=>{
+      selectChangelogVersion(VERSION);
+      if(infoModal) infoModal.setAttribute('aria-hidden', 'true');
+      showChangelog(true);
+    });
+  }
 })();
