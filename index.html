@@ -489,11 +489,11 @@
   </div>
   <div id="historyOverlay" class="history-overlay"></div>
 
-  <!-- Changelog toast (v3.0.1) -->
-  <div id="changelogToast" class="changelog-toast" data-current-version="3.0.1" aria-hidden="true">
+  <!-- Changelog toast (v3.0.2) -->
+  <div id="changelogToast" class="changelog-toast" data-current-version="3.0.2" aria-hidden="true">
     <div class="changelog-toast__header">
       <div class="changelog-toast__title">
-        <span class="changelog-toast__badge">v3.0.1</span>
+        <span class="changelog-toast__badge">v3.0.2</span>
         <span>Site Updated</span>
       </div>
       <div class="changelog-toast__actions">
@@ -503,10 +503,19 @@
     </div>
     <div class="changelog-toast__body" id="changelogBody">
       <div class="changelog-toast__versions" role="tablist" aria-label="Changelog versions">
-        <button class="changelog-toast__version active" type="button" role="tab" data-changelog-version-button="3.0.1" aria-selected="true">v3.0.1</button>
+        <button class="changelog-toast__version active" type="button" role="tab" data-changelog-version-button="3.0.2" aria-selected="true">v3.0.2</button>
+        <button class="changelog-toast__version" type="button" role="tab" data-changelog-version-button="3.0.1" aria-selected="false">v3.0.1</button>
         <button class="changelog-toast__version" type="button" role="tab" data-changelog-version-button="3.0.0" aria-selected="false">v3.0.0</button>
       </div>
-      <section class="changelog-toast__release active" data-changelog-version="3.0.1" role="tabpanel">
+      <section class="changelog-toast__release active" data-changelog-version="3.0.2" role="tabpanel">
+        <ul class="changelog-toast__list">
+          <li><strong>Mobile layout fixes</strong> — fullscreen controls, timelines, volume, and waveform controls now stay inside the player in portrait and landscape orientations.</li>
+          <li><strong>Stable fullscreen rotation</strong> — reopening the player or rotating the device no longer leaves the panel shifted sideways.</li>
+          <li><strong>Contained filter menu</strong> — mobile filter options are clamped inside the viewport instead of opening partially offscreen.</li>
+          <li><strong>Audio metadata cleanup</strong> — corrected M4A titles and artist tags, removed album tags from drum mixes, and synchronized the organized archive copies.</li>
+        </ul>
+      </section>
+      <section class="changelog-toast__release" data-changelog-version="3.0.1" role="tabpanel" hidden>
         <ul class="changelog-toast__list">
           <li><strong>Complete OST archive</strong> — Download Complete OST now uses a prebuilt, organized ZIP containing the main soundtrack, drum mixes, and custom tracks.</li>
           <li><strong>Download-manager support</strong> — the OST download is a native link, so its release URL can be copied directly from the browser context menu.</li>

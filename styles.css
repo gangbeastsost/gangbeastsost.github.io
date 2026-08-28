@@ -2698,3 +2698,114 @@ body::after{
 body.lite-mode .modal-bg,body.lite-mode .modal-bg2{
   filter:blur(6px) brightness(.36) saturate(.88);
 }
+
+/* Mobile player containment and orientation stability. */
+.modal-info,
+.m-progress,
+.m-controls,
+.m-volume{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.m-volume input[type=range]{min-width:0;width:100%}
+.view-dropdown{
+  max-height:calc(100vh - 24px);
+  max-height:calc(100dvh - 24px);
+  overflow-y:auto;
+  box-sizing:border-box;
+}
+body.modal-open{overflow:hidden}
+
+@media (max-width:700px){
+  .modal{
+    padding:max(18px,env(safe-area-inset-top)) 12px max(18px,env(safe-area-inset-bottom));
+    overflow-x:hidden;
+    overflow-y:auto;
+  }
+  .modal-player{
+    width:100%;
+    max-width:720px;
+    margin:0;
+    left:auto;
+    right:auto;
+    transform:none;
+    padding:16px;
+    gap:12px;
+    box-sizing:border-box;
+  }
+  .modal-art{min-width:0;box-sizing:border-box}
+  .modal-info{width:100%}
+  .m-progress,.m-volume{width:100%}
+  .m-controls{
+    display:grid;
+    grid-template-columns:repeat(6,minmax(0,1fr));
+    gap:8px;
+    width:100%;
+  }
+  .m-controls button{
+    width:100%;
+    min-width:0;
+    padding:10px 0;
+    font-size:18px;
+  }
+}
+
+@media (max-width:360px){
+  .m-controls{gap:6px}
+  .m-controls button{padding:8px 0}
+}
+
+@media (orientation:landscape) and (max-height:520px){
+  .modal{
+    padding:10px 14px;
+    overflow:hidden;
+  }
+  .modal-player{
+    width:100%;
+    max-width:1100px;
+    max-height:calc(100vh - 20px);
+    max-height:calc(100dvh - 20px);
+    margin:0;
+    left:auto;
+    right:auto;
+    transform:none;
+    padding:16px;
+    gap:14px;
+    flex-direction:row;
+    align-items:center;
+    box-sizing:border-box;
+  }
+  .modal-art{
+    flex:0 1 42%;
+    min-width:0;
+    padding:10px;
+    box-sizing:border-box;
+  }
+  .modal-art img{
+    width:100%;
+    max-height:calc(100vh - 70px);
+    max-height:calc(100dvh - 70px);
+    object-fit:contain;
+  }
+  .modal-info{flex:1 1 0;width:auto;min-width:0}
+  .m-progress{width:100%;margin-top:10px}
+  .m-controls{
+    display:grid;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+    gap:8px;
+    width:100%;
+    margin-top:12px;
+  }
+  .m-controls button{
+    width:100%;
+    min-width:0;
+    padding:8px 0;
+    font-size:18px;
+  }
+  .m-volume{width:100%;margin-top:8px!important}
+}
+
+@media (orientation:landscape) and (max-height:520px) and (max-width:700px){
+  .m-controls{grid-template-columns:repeat(6,minmax(0,1fr))}
+}

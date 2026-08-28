@@ -2603,7 +2603,29 @@ async function init(){
   try{
     if(viewBtn && viewDropdown){
       const closeDropdown = ()=>{ viewBtn.setAttribute('aria-expanded','false'); viewDropdown.setAttribute('aria-hidden','true'); };
-      const openDropdown = ()=>{ viewBtn.setAttribute('aria-expanded','true'); viewDropdown.setAttribute('aria-hidden','false'); };
+      const positionDropdown = ()=>{
+        if(viewDropdown.getAttribute('aria-hidden') !== 'false') return;
+        const buttonRect = viewBtn.getBoundingClientRect();
+        const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+        const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+        const edgeGap = 12;
+        const menuWidth = Math.min(220, Math.max(0, viewportWidth - (edgeGap * 2)));
+        viewDropdown.style.position = 'fixed';
+        viewDropdown.style.width = `${Math.round(menuWidth)}px`;
+        viewDropdown.style.transform = 'none';
+        const menuHeight = viewDropdown.offsetHeight;
+        const centeredLeft = buttonRect.left + (buttonRect.width / 2) - (menuWidth / 2);
+        const left = Math.max(edgeGap, Math.min(centeredLeft, viewportWidth - menuWidth - edgeGap));
+        const preferredTop = buttonRect.bottom + 8;
+        const top = Math.max(edgeGap, Math.min(preferredTop, viewportHeight - menuHeight - edgeGap));
+        viewDropdown.style.left = `${Math.round(left)}px`;
+        viewDropdown.style.top = `${Math.round(top)}px`;
+      };
+      const openDropdown = ()=>{
+        viewBtn.setAttribute('aria-expanded','true');
+        viewDropdown.setAttribute('aria-hidden','false');
+        positionDropdown();
+      };
       viewBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); const open = viewBtn.getAttribute('aria-expanded') === 'true'; if(open) closeDropdown(); else openDropdown(); });
       // selection: single-select behavior
       viewDropdown.addEventListener('click', (ev)=>{
@@ -2625,6 +2647,8 @@ async function init(){
       // close when clicking outside or pressing Escape
       document.addEventListener('click', ()=>{ closeDropdown(); });
       document.addEventListener('keydown', (ev)=>{ if(ev.key === 'Escape') closeDropdown(); });
+      window.addEventListener('resize', positionDropdown);
+      if(window.visualViewport) window.visualViewport.addEventListener('resize', positionDropdown);
     }
   }catch(e){}
 
@@ -3314,7 +3338,11 @@ function renderList(){
     const el = document.createElement('button');
     el.className = 'track';
     const trackNumber = String(listPosition + 1).padStart(2, '0');
-    const stageLabel = [displayTrack.stage, displayTrack.side ? `Side ${displayTrack.side}` : ''].filter(Boolean).join(' / ');
+    const normalizedSide = String(displayTrack.side || '').trim().toLowerCase();
+    const sideLabel = normalizedSide === 'drums'
+      ? 'Drum'
+      : (displayTrack.side ? `Side ${displayTrack.side}` : '');
+    const stageLabel = [displayTrack.stage, sideLabel].filter(Boolean).join(' / ');
     el.style.setProperty('--track-accent', getTrackStageAccent(displayTrack));
     el.dataset.stage = String(displayTrack.stage || displayTrack.title || 'Track');
     el.innerHTML = `<span class="track-number" aria-hidden="true">${trackNumber}</span><img src="${encodeURI(displayTrack.image)}" alt=""><div class="meta"><div class="title"><span class="title-text">${escapeHtml(displayTrack.title)}</span><span class="track-dur">${trackDurations[displayIndex]?fmt(trackDurations[displayIndex]):''}</span></div><div class="track-meta-line"><span class="track-stage">${escapeHtml(stageLabel)}</span><span class="sub">${escapeHtml(_getDisplayArtist(displayTrack))}</span></div></div><span class="track-meter" aria-hidden="true"><i></i><i></i><i></i><i></i></span>`;

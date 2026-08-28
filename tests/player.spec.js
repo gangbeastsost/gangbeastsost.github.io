@@ -91,6 +91,10 @@ test('loads the catalog and supports search and built-in filters', async ({ page
     await chooseFilter(page, filter);
     await expect(cards).toHaveCount(expectedCount(filter));
   }
+
+  await chooseFilter(page, 'drums-only');
+  await expect(cards.first().locator('.track-stage')).toHaveText(/\/ DRUM$/);
+  await expect(cards.first().locator('.track-stage')).not.toContainText('SIDE DRUM');
 });
 
 test('opens a search-only floating control with Ctrl or Command F', async ({ page }) => {
@@ -239,6 +243,64 @@ test('keeps the list toolbar and rows compact on mobile', async ({ page }) => {
   expect(Math.abs(mobileLayout.switcherCenter - mobileLayout.durationCenter)).toBeLessThanOrEqual(2);
   expect(mobileLayout.cardHeight).toBeLessThanOrEqual(70);
   await expect(page.locator('#layoutSwitcher [data-layout="list"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('keeps mobile filters and fullscreen controls inside the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPlayer(page, '/?song=Blimp-B');
+
+  await page.locator('#viewBtn').click();
+  const filterBounds = await page.locator('#viewDropdown').evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
+  });
+  expect(filterBounds.left).toBeGreaterThanOrEqual(0);
+  expect(filterBounds.right).toBeLessThanOrEqual(filterBounds.viewportWidth);
+  expect(filterBounds.top).toBeGreaterThanOrEqual(0);
+  expect(filterBounds.bottom).toBeLessThanOrEqual(filterBounds.viewportHeight);
+  await page.locator('#viewBtn').click();
+
+  await page.locator('#miniCover').click();
+  await expect(page.locator('#modal')).not.toHaveClass(/hidden/);
+  await page.waitForTimeout(350);
+
+  const readModalBounds = () => page.locator('#modal').evaluate((element) => {
+    const bounds = (selector) => {
+      const target = element.querySelector(selector);
+      if (!target || getComputedStyle(target).display === 'none') return null;
+      const rect = target.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    };
+    const player = bounds('.modal-player');
+    const controls = ['#mShuffle', '#mAutoplay', '#mWaveform', '.m-progress', '.m-volume']
+      .map(bounds)
+      .filter(Boolean);
+    return { player, controls, viewportWidth: innerWidth, viewportHeight: innerHeight };
+  });
+  const expectContained = (layout) => {
+    expect(layout.player.left).toBeGreaterThanOrEqual(0);
+    expect(layout.player.right).toBeLessThanOrEqual(layout.viewportWidth);
+    for (const control of layout.controls) {
+      expect(control.left).toBeGreaterThanOrEqual(layout.player.left);
+      expect(control.right).toBeLessThanOrEqual(layout.player.right);
+    }
+  };
+
+  expectContained(await readModalBounds());
+  await page.setViewportSize({ width: 844, height: 390 });
+  expectContained(await readModalBounds());
+  await page.setViewportSize({ width: 390, height: 844 });
+  expectContained(await readModalBounds());
+
+  await page.locator('#modalBack').click();
+  await expect(page.locator('#modal')).toHaveClass(/hidden/);
+  await page.locator('#miniCover').click();
+  await expect(page.locator('#modal')).not.toHaveClass(/hidden/);
+  await page.waitForTimeout(350);
+  const reopened = await readModalBounds();
+  expectContained(reopened);
+  const playerCenter = (reopened.player.left + reopened.player.right) / 2;
+  expect(Math.abs(playerCenter - (reopened.viewportWidth / 2))).toBeLessThanOrEqual(12);
 });
 
 test('keeps the playing-card hover lift and uses the gummy timeline styling', async ({ page }) => {
@@ -603,35 +665,42 @@ test('restores persisted visual settings, filter, and layout preferences', async
   await expect(page.locator('#toggleLiteMode')).toBeChecked();
 });
 
-test('announces 3.0.1 and keeps the 3.0.0 changelog accessible', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('gb:changelog-seen', '3.0.0'));
+test('announces 3.0.2 and keeps previous changelogs accessible', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gb:changelog-seen', '3.0.1'));
   await openPlayer(page);
 
   const toast = page.locator('#changelogToast');
-  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.1');
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.2');
   await expect(toast).toHaveClass(/visible/);
   await page.locator('#changelogToggle').click();
   await expect(page.locator('#changelogBody')).toHaveClass(/open/);
-  const currentRelease = page.locator('[data-changelog-version="3.0.1"]');
-  await expect(currentRelease.locator('li')).toHaveCount(3);
-  await expect(currentRelease).toContainText('Complete OST archive');
-  await expect(currentRelease).not.toContainText('Whopper');
+  const currentRelease = page.locator('[data-changelog-version="3.0.2"]');
+  await expect(currentRelease.locator('li')).toHaveCount(4);
+  await expect(currentRelease).toContainText('Mobile layout fixes');
+  await expect(currentRelease).toContainText('Audio metadata cleanup');
+
+  await page.locator('[data-changelog-version-button="3.0.1"]').click();
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.1');
+  const previousRelease = page.locator('[data-changelog-version="3.0.1"]');
+  await expect(previousRelease).toBeVisible();
+  await expect(previousRelease.locator('li')).toHaveCount(3);
+  await expect(previousRelease).toContainText('Complete OST archive');
 
   await page.locator('[data-changelog-version-button="3.0.0"]').click();
   await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.0');
-  const previousRelease = page.locator('[data-changelog-version="3.0.0"]');
-  await expect(previousRelease).toBeVisible();
-  await expect(previousRelease.locator('li')).toHaveCount(9);
-  await expect(previousRelease).toContainText('Higher-fidelity M4A audio');
-  await expect(previousRelease).toContainText('Custom group sharing');
+  const originalRelease = page.locator('[data-changelog-version="3.0.0"]');
+  await expect(originalRelease).toBeVisible();
+  await expect(originalRelease.locator('li')).toHaveCount(9);
+  await expect(originalRelease).toContainText('Higher-fidelity M4A audio');
+  await expect(originalRelease).toContainText('Custom group sharing');
 
   await page.locator('#changelogClose').click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:changelog-seen'))).toBe('3.0.1');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('gb:changelog-seen'))).toBe('3.0.2');
 
   await page.locator('#helpBtn').click();
   await page.locator('#showChangelogBtn').click();
   await expect(toast).toHaveClass(/visible/);
-  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.1');
+  await expect(page.locator('.changelog-toast__badge')).toHaveText('v3.0.2');
 });
 
 test('restores, opens, plays from, and clears listen history', async ({ page }) => {
