@@ -93,7 +93,7 @@ test('loads the catalog and supports search and built-in filters', async ({ page
   }
 
   await chooseFilter(page, 'drums-only');
-  await expect(cards.first().locator('.track-stage')).toHaveText(/\/ DRUM$/);
+  await expect(cards.first().locator('.track-stage')).toHaveText(/\/ Drum$/);
   await expect(cards.first().locator('.track-stage')).not.toContainText('SIDE DRUM');
 });
 
