@@ -366,6 +366,42 @@ test('plays, pauses, seeks, and changes tracks', async ({ page }) => {
   await expect(page.locator('#trackTitle')).not.toHaveText('Tutorial');
 });
 
+test('retries an automatic track advance after background playback is blocked', async ({ page }) => {
+  await openPlayer(page);
+
+  const tutorialIndex = tracks.findIndex((track) => track.stage === 'Tutorial' && track.side === 'A');
+  await page.locator(`.track[data-track-index="${tutorialIndex}"]`).click();
+  await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.paused)).toBe(false);
+
+  await page.evaluate(() => {
+    const audio = document.querySelector('#audio');
+    const nativePlay = audio.play.bind(audio);
+    window.__blockAutoAdvance = true;
+    window.__autoAdvancePlayAttempts = 0;
+    audio.play = function play() {
+      window.__autoAdvancePlayAttempts += 1;
+      if (window.__blockAutoAdvance) {
+        return Promise.reject(new DOMException('Background playback blocked', 'NotAllowedError'));
+      }
+      return nativePlay();
+    };
+    audio.dispatchEvent(new Event('ended'));
+  });
+
+  await expect(page.locator('#trackTitle')).not.toHaveText('Tutorial');
+  await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.paused)).toBe(true);
+  await expect(page.locator('#audio')).toHaveJSProperty('autoplay', true);
+  expect(await page.evaluate(() => window.__autoAdvancePlayAttempts)).toBeGreaterThan(0);
+
+  await page.evaluate(() => {
+    window.__blockAutoAdvance = false;
+    window.dispatchEvent(new Event('pageshow'));
+  });
+  await expect.poll(() => page.locator('#audio').evaluate((audio) => audio.paused)).toBe(false);
+  await expect(page.locator('#audio')).toHaveJSProperty('autoplay', true);
+  expect(await page.evaluate(() => window.__autoAdvancePlayAttempts)).toBeGreaterThan(1);
+});
+
 test('opens dedicated share links as paused deep links', async ({ page }) => {
   await openPlayer(page, '/song/Tutorial-A/');
 

@@ -216,6 +216,12 @@ function setupIOSPauseOnBackground(){
           // Small delay — wait for context resume to take effect.
           setTimeout(()=>{ try{ _iosRestoreWebLoop(); }catch(e){} }, 200);
         }
+        // iOS standalone apps can leave a completed track paused after the
+        // next source is loaded. Retry that continuation when the app returns.
+        if(_autoAdvancePlaybackPending){
+          try{ void _retryAutoAdvancePlayback(true); }catch(e){}
+          try{ setTimeout(()=>{ try{ void _retryAutoAdvancePlayback(true); }catch(e){} }, 220); }catch(e){}
+        }
       }catch(e){}
     };
 
@@ -1032,6 +1038,9 @@ let _cancelMediaPreparation = null;
 let _cancelSafariSeekResume = null;
 let _safariSeekResumePending = false;
 let _safariSeekResumeToken = 0;
+let _autoAdvancePlaybackPending = false;
+let _autoAdvancePlaybackToken = 0;
+let _autoAdvanceRetryInFlight = false;
 let isShuffling = false;
 let loopMode = 'off'; // 'off' | 'one' | 'all'
 let isAutoplay = true;
@@ -1053,6 +1062,77 @@ let progressRaf = null;
 let searchQuery = '';
 let floatingShipPreferredSide = FLOATING_SHIP_SIDE_ORIGINAL;
 
+function _clearAutoAdvancePlayback(){
+  _autoAdvancePlaybackPending = false;
+  _autoAdvancePlaybackToken = 0;
+  try{
+    if(audio){
+      audio.autoplay = false;
+      audio.preload = 'none';
+    }
+  }catch(e){}
+}
+
+function _markAutoAdvancePlayback(token = _mediaLoadToken){
+  _autoAdvancePlaybackPending = true;
+  _autoAdvancePlaybackToken = token;
+  try{
+    if(audio){
+      // Keep the current media element in its autoplay continuation path. iOS
+      // standalone apps may reject a new play() call after the prior item ends.
+      audio.autoplay = true;
+      audio.preload = 'auto';
+    }
+  }catch(e){}
+}
+
+function _isAutoAdvancePlaybackCurrent(){
+  try{
+    return _autoAdvancePlaybackPending
+      && _autoAdvancePlaybackToken === _mediaLoadToken
+      && !!(audio && audio.src)
+      && isAutoplayEnabled();
+  }catch(e){ return false; }
+}
+
+function _finishAutoAdvancePlayback(token = _mediaLoadToken){
+  if(token !== _mediaLoadToken) return;
+  _autoAdvancePlaybackPending = false;
+  _autoAdvancePlaybackToken = 0;
+  try{
+    if(audio){
+      audio.autoplay = isAutoplayEnabled();
+      audio.preload = 'none';
+    }
+  }catch(e){}
+}
+
+async function _retryAutoAdvancePlayback(force = false){
+  if(!force){
+    try{ if(document.visibilityState === 'hidden') return false; }catch(e){}
+  }
+  if(!_isAutoAdvancePlaybackCurrent() || _autoAdvanceRetryInFlight) return false;
+  const token = _autoAdvancePlaybackToken;
+  _autoAdvanceRetryInFlight = true;
+  try{
+    try{ audio.autoplay = true; audio.preload = 'auto'; }catch(e){}
+    const playPromise = audio.play();
+    await Promise.all([_mediaLoadReady, Promise.resolve(playPromise)]);
+    if(token !== _mediaLoadToken || !_isAutoAdvancePlaybackCurrent() || audio.paused){
+      return false;
+    }
+    _finishAutoAdvancePlayback(token);
+    _setPlaybackState(true);
+    return true;
+  }catch(e){
+    // Keep the request pending so pageshow, visibilitychange, or a media
+    // session play command can retry it when iOS allows playback again.
+    return false;
+  }finally{
+    _autoAdvanceRetryInFlight = false;
+  }
+}
+
 function _setPlaybackState(playing){
   const nextState = !!playing;
   isPlaying = nextState;
@@ -1064,7 +1144,7 @@ function _setPlaybackState(playing){
   try{ updateMediaSessionPlaybackState(); updateMediaSessionPosition(true); }catch(e){}
 }
 
-function _beginNativeMediaLoad(source, initialSeek=0){
+function _beginNativeMediaLoad(source, initialSeek=0, opts={}){
   _safariSeekResumeToken++;
   try{ if(_cancelSafariSeekResume) _cancelSafariSeekResume(); }catch(e){}
   try{ if(_cancelMediaPreparation) _cancelMediaPreparation(); }catch(e){}
@@ -1072,11 +1152,26 @@ function _beginNativeMediaLoad(source, initialSeek=0){
 
   const token = ++_mediaLoadToken;
   const seekTarget = Math.max(0, Number(initialSeek) || 0);
+  const autoAdvance = !!(opts && opts.autoAdvance);
   const holdMuted = seekTarget > 0;
   const previousMuted = !!audio.muted;
+  const preserveAutoAdvance = autoAdvance && (isPlaying || !!(audio && audio.ended));
+  if(autoAdvance) _markAutoAdvancePlayback(token);
+  else _clearAutoAdvancePlayback();
   _mediaLoadPending = true;
   _mediaLoadSource = source;
-  _setPlaybackState(false);
+  if(preserveAutoAdvance){
+    // Keep the OS media session in the playing state while the next source
+    // replaces the ended one. Dropping to paused here triggers the iOS PWA bug.
+    isPlaying = true;
+    try{ if(mPlay) mPlay.textContent = '❚❚'; }catch(e){}
+    try{ if(miniPlay) miniPlay.textContent = '❚❚'; }catch(e){}
+    try{ if(heroArt) heroArt.classList.add('playing'); }catch(e){}
+    try{ updateMediaSessionPlaybackState(); }catch(e){}
+    try{ stopProgress(); }catch(e){}
+  }else{
+    _setPlaybackState(false);
+  }
   try{ audio.pause(); }catch(e){}
   if(holdMuted){
     try{ audio.muted = true; }catch(e){}
@@ -1163,6 +1258,8 @@ function _beginNativeMediaLoad(source, initialSeek=0){
   _mediaLoadReady.catch(()=>{});
 
   try{
+    audio.autoplay = autoAdvance;
+    audio.preload = autoAdvance ? 'auto' : 'none';
     audio.src = encodeURI(source);
     audio.load();
   }catch(e){
@@ -1343,13 +1440,23 @@ try{
     audio.addEventListener('stalled', ()=>{
       try{ if(audio && audio.src) showPreloadToast("Preloading... This shouldn't take long."); }catch(e){}
     });
-    audio.addEventListener('canplay', ()=>{ try{ hidePreloadToast(); }catch(e){} });
+    audio.addEventListener('canplay', ()=>{
+      try{ hidePreloadToast(); }catch(e){}
+      try{
+        if(_isAutoAdvancePlaybackCurrent() && document.visibilityState !== 'hidden'){
+          void _retryAutoAdvancePlayback();
+        }
+      }catch(e){}
+    });
     audio.addEventListener('playing', ()=>{
       try{ hidePreloadToast(); }catch(e){}
+      try{ if(_isAutoAdvancePlaybackCurrent()) _finishAutoAdvancePlayback(); }catch(e){}
+      try{ if(!_mediaLoadPending && !webPlaying && isAutoplayEnabled()) audio.autoplay = true; }catch(e){}
       try{ if(!_mediaLoadPending && !webPlaying) _setPlaybackState(true); }catch(e){}
     });
     audio.addEventListener('error', ()=>{
       try{ hidePreloadToast(); }catch(e){}
+      try{ if(_isAutoAdvancePlaybackCurrent()) _clearAutoAdvancePlayback(); }catch(e){}
       try{ if(!webPlaying) _setPlaybackState(false); }catch(e){}
     });
   }
@@ -3495,6 +3602,7 @@ function hideContextMenu(){
 function loadTrack(i, opts={fade:'cross'}){
   const resolvedIndex = _resolveTrackIndexForPlayback(i, opts);
   index = resolvedIndex;
+  const autoAdvance = !!(opts && opts.autoAdvance);
   historyController.resetForTrack(index);
   try{ updateTrackActiveState(); }catch(e){}
   try{ requestAnimationFrame(()=>{ try{ ensureActiveTrackVisible({ smooth:true }); }catch(e){} }); }catch(e){}
@@ -3518,7 +3626,7 @@ function loadTrack(i, opts={fade:'cross'}){
   }else{
     activeAirportSectionId = '';
   }
-  _beginNativeMediaLoad(_audioFile(t.file), initialSeek);
+  _beginNativeMediaLoad(_audioFile(t.file), initialSeek, { autoAdvance });
   // do not pre-decode here to avoid blocking load; decoding happens when play is requested
   trackTitle.classList.add('track-title-main');
   // For Airport tracks, resolve the correct cover for the initial seek position
@@ -3648,15 +3756,20 @@ function loadTrack(i, opts={fade:'cross'}){
 }
 
 
-async function _playNativeAudioForCurrentLoad(){
+async function _playNativeAudioForCurrentLoad(opts={}){
   const token = _mediaLoadToken;
+  const autoAdvance = !!(opts && opts.autoAdvance) || _isAutoAdvancePlaybackCurrent();
+  if(autoAdvance) _markAutoAdvancePlayback(token);
   let playPromise;
   try{
     // Call play immediately so the request remains associated with the user's gesture.
     // Airport audio stays muted until its deferred initial seek is confirmed.
     playPromise = audio.play();
   }catch(e){
-    if(token === _mediaLoadToken) _setPlaybackState(false);
+    if(token === _mediaLoadToken){
+      if(autoAdvance) _markAutoAdvancePlayback(token);
+      _setPlaybackState(false);
+    }
     console.warn('audio.play failed', e);
     return false;
   }
@@ -3665,11 +3778,13 @@ async function _playNativeAudioForCurrentLoad(){
     await Promise.all([_mediaLoadReady, playPromise]);
     if(token !== _mediaLoadToken) return false;
     if(audio.paused) throw new Error('Playback did not enter the playing state');
+    if(autoAdvance) _finishAutoAdvancePlayback(token);
     _setPlaybackState(true);
     return true;
   }catch(e){
     if(token === _mediaLoadToken){
       try{ audio.pause(); }catch(e2){}
+      if(autoAdvance) _markAutoAdvancePlayback(token);
       _setPlaybackState(false);
     }
     if(!e || e.name !== 'AbortError') console.warn('audio.play failed', e);
@@ -3677,7 +3792,8 @@ async function _playNativeAudioForCurrentLoad(){
   }
 }
 
-async function play(){
+async function play(opts={}){
+  const autoAdvance = !!(opts && opts.autoAdvance) || _isAutoAdvancePlaybackCurrent();
   // record history once per track, only when actually playing (not on load/restore)
   try{
     if(tracks[index]){
@@ -3729,12 +3845,12 @@ async function play(){
         }
       }catch(e){ setPreloading(false); console.warn('decode/play failed, using fallback', e); }
       // fallback to audio element
-      return _playNativeAudioForCurrentLoad();
+      return _playNativeAudioForCurrentLoad({ autoAdvance });
     }
   }
   // Non-loop mode: stop any web loop and use <audio>
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
-  return _playNativeAudioForCurrentLoad();
+  return _playNativeAudioForCurrentLoad({ autoAdvance });
 }
 
 function pause(){
@@ -3748,6 +3864,7 @@ function pause(){
     }
   }catch(e){}
   try{ audio.pause(); }catch(e){}
+  _clearAutoAdvancePlayback();
   _setPlaybackState(false);
 }
 
@@ -3845,6 +3962,7 @@ function setAutoplayState(active){
   isAutoplay = !!active;
   // disabling autoplay forces off states that require autoplay
   if(!isAutoplay){
+    _clearAutoAdvancePlayback();
     if(isShuffling) setShuffleState(false);
     if(loopMode === 'all') setLoopState('off');
   }
@@ -3957,8 +4075,9 @@ function toggleLoop(){
   else                         setLoopState('off');
 }
 
-function skip(dir){
+function skip(dir, opts={}){
   if(!tracks || !tracks.length) return;
+  const autoAdvance = !!(opts && opts.autoAdvance);
 
   // When shuffle is enabled, Next/Prev should follow the shuffle order.
   if(isShuffling){
@@ -4024,16 +4143,17 @@ function skip(dir){
   try{ if(webPlaying) stopWebLoop(); }catch(e){}
 
   if(!modal.classList.contains('hidden')){
-    loadTrack(targetPlaybackIndex, {fade:'cross'});
+    loadTrack(targetPlaybackIndex, {fade:'cross', autoAdvance});
   } else {
-    loadTrack(targetPlaybackIndex, {fade:'in'});
+    loadTrack(targetPlaybackIndex, {fade:'in', autoAdvance});
   }
-  play();
+  play({ autoAdvance });
 }
 
 function clearPlaybackToNoSong(){
   if(_clearingNoSong) return;
   _clearingNoSong = true;
+  _clearAutoAdvancePlayback();
   try{ if(_cancelMediaPreparation) _cancelMediaPreparation(); }catch(e){}
   _mediaLoadToken++;
   _mediaLoadPending = false;
@@ -4131,7 +4251,12 @@ try{
   audio.addEventListener('seeked', ()=>{ _audioSeeking = false; try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = _nowMs(); }catch(e){} });
   audio.addEventListener('pause', ()=>{
     try{ _audioTimeBase = audio.currentTime || 0; _audioTimeStamp = 0; }catch(e){}
-    try{ if(!webPlaying && !_safariSeekResumePending) _setPlaybackState(false); }catch(e){}
+    try{
+      const naturalEnd = !!(audio && audio.ended && isAutoplayEnabled());
+      if(!webPlaying && !_safariSeekResumePending && !_mediaLoadPending && !naturalEnd){
+        _setPlaybackState(false);
+      }
+    }catch(e){}
     try{
       // Fallback for browsers where ended sequencing is inconsistent:
       // if media is ended and autoplay is off, force no-song reset.
@@ -4288,7 +4413,7 @@ audio.addEventListener('ended',()=>{
   if(loopMode === 'one'){
     const _ls = _getTrackLoopStart(tracks && tracks[index]);
     try{ audio.currentTime = _catalogTimeToMediaTime(_ls || 0, audio.duration); }catch(e){ try{ audio.currentTime = 0; }catch(e2){} }
-    play();
+    play({ autoAdvance: true });
     return;
   }
   try{ stopProgress(); }catch(e){}
@@ -4322,15 +4447,15 @@ audio.addEventListener('ended',()=>{
       try{ if(shuffleHistory) shuffleHistory.push(index); if(shuffleForward) shuffleForward = []; }catch(e){}
       index = nextIndex;
       if(!modal.classList.contains('hidden')){
-        loadTrack(index, {fade:'cross'});
+        loadTrack(index, {fade:'cross', autoAdvance:true});
       } else {
-        loadTrack(index, {fade:'in'});
+        loadTrack(index, {fade:'in', autoAdvance:true});
       }
-      play();
+      play({ autoAdvance:true });
       return;
     }catch(e){ console.warn('shuffle transition failed, falling back', e); }
     // fallback to sequential if shuffle fails or no viable candidates
-    skip(1);
+    skip(1, { autoAdvance:true });
     return;
   }
   try{
@@ -4342,11 +4467,11 @@ audio.addEventListener('ended',()=>{
         // wrap back to first track
         index = playable[0];
         if(!modal.classList.contains('hidden')){
-          loadTrack(index, {fade:'cross'});
+          loadTrack(index, {fade:'cross', autoAdvance:true});
         } else {
-          loadTrack(index, {fade:'in'});
+          loadTrack(index, {fade:'in', autoAdvance:true});
         }
-        play();
+        play({ autoAdvance:true });
         return;
       }
       clearPlaybackToNoSong();
@@ -4354,7 +4479,7 @@ audio.addEventListener('ended',()=>{
       return;
     }
   }catch(e){}
-  skip(1);
+  skip(1, { autoAdvance:true });
 });
 
 // wire modal shuffle/loop only (top controls removed)
